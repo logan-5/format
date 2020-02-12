@@ -13,4 +13,8 @@ TEST_CASE("make_format_args", "") {
     REQUIRE(lrstd::format("{1:}ello, {0:}orld\n", 'h', 'w') ==
             "wello, horld\n");
     REQUIRE(lrstd::format("{:}ello, {:}orld\n", 'h', 'w') == "hello, world\n");
+    REQUIRE(lrstd::format("{1:6}ello, {0:*<6}orld\n", 'h', 'w') ==
+            "wello, horld\n");
+    REQUIRE(lrstd::format("{:*^6}ello, {:0=#6x}orld\n", 'h', 'w') ==
+            "hello, world\n");
 }
