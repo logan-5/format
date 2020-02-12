@@ -148,6 +148,11 @@ class basic_format_parse_context {
 
     void ncc() {}
 
+    template <class C, class O>
+    friend O detail::vformat_to_impl(O out,
+                                     basic_string_view<C> fmt,
+                                     format_args_t<O, C>& args);
+
    public:
     explicit constexpr basic_format_parse_context(basic_string_view<CharT> fmt,
                                                   size_t num_args = 0) noexcept
@@ -334,6 +339,9 @@ class basic_format_args {
     std::size_t _size;
     const basic_format_arg<Context>* _data;
 
+    template <class, class>
+    friend class basic_format_context;
+
    public:
     constexpr basic_format_args() noexcept : _size{0}, _data{nullptr} {}
 
@@ -360,6 +368,8 @@ class basic_format_context {
     friend O detail::vformat_to_impl(O out,
                                      basic_string_view<C> fmt,
                                      format_args_t<O, C>& args);
+
+    constexpr std::size_t args_size() const { return _args._size; }
 
    public:
     using iterator = Out;
@@ -446,9 +456,11 @@ struct escaped_lbrace {};
 struct escaped_rbrace {};
 struct error {};
 
+template <class CharT>
 struct replacement_field {
     using arg_id_t = unsigned;
     arg_id_t arg_id;
+    basic_string_view<CharT> format_spec;
 
     static constexpr arg_id_t auto_val() noexcept {
         return std::numeric_limits<arg_id_t>::max();
@@ -456,73 +468,86 @@ struct replacement_field {
     constexpr bool is_auto() const noexcept { return arg_id == auto_val(); }
 };
 
+template <class CharT>
 using result = std::variant<end,
                             text,
                             escaped_lbrace,
                             escaped_rbrace,
-                            replacement_field,
+                            replacement_field<CharT>,
                             error>;
 
 template <class CharT>
-constexpr bool consume(basic_format_parse_context<CharT>& ctx,
+constexpr bool consume(basic_string_view<CharT>& fmt,
                        basic_string_view<CharT> prefix) {
     using Traits = typename basic_string_view<CharT>::traits_type;
-    if (std::distance(ctx.begin(), ctx.end()) >= prefix.size() &&
-        Traits::compare(ctx.begin(), prefix.begin(), prefix.size()) == 0) {
-        ctx.advance_to(ctx.begin() + prefix.size());
+    if (fmt.size() >= prefix.size() &&
+        Traits::compare(fmt.begin(), prefix.begin(), prefix.size()) == 0) {
+        fmt.remove_prefix(prefix.size());
         return true;
     }
     return false;
 }
 template <class CharT>
-constexpr bool consume(basic_format_parse_context<CharT>& ctx, CharT c) {
-    if (*ctx.begin() == c) {
-        ctx.advance_to(ctx.begin() + 1);
+constexpr bool consume(basic_string_view<CharT>& fmt, CharT c) {
+    if (*fmt.begin() == c) {
+        fmt.remove_prefix(1);
         return true;
     }
     return false;
 }
 
-constexpr std::variant<
-      replacement_field::arg_id_t,
-      std::nullopt_t,
-      error> inline parse_arg_id(basic_format_parse_context<char>& ctx) {
-    if (consume(ctx, '0'))
-        return replacement_field::arg_id_t(0);
-    replacement_field::arg_id_t val = 0;
-    const auto result = std::from_chars(ctx.begin(), ctx.end(), val, 10);
-    if (result.ptr == ctx.begin())
+template <class CharT>
+void advance_to(basic_string_view<CharT>& s,
+                typename basic_string_view<CharT>::iterator pos) {
+    s.remove_prefix(std::distance(s.begin(), pos));
+}
+
+constexpr std::variant<replacement_field<char>::arg_id_t,
+                       std::nullopt_t,
+                       error> inline parse_arg_id(basic_string_view<char>&
+                                                        fmt) {
+    if (consume(fmt, '0'))
+        return replacement_field<char>::arg_id_t(0);
+    replacement_field<char>::arg_id_t val = 0;
+    const auto result = std::from_chars(fmt.begin(), fmt.end(), val, 10);
+    if (result.ptr == fmt.begin())
         return std::nullopt;
     if (result.ec != std::errc())
         return error{};
-    ctx.advance_to(result.ptr);
+    advance_to(fmt, result.ptr);
     return val;
 }
 
-inline std::variant<replacement_field::arg_id_t, std::nullopt_t, error>
-parse_arg_id(basic_format_parse_context<wchar_t>& ctx) {
+inline std::variant<replacement_field<wchar_t>::arg_id_t, std::nullopt_t, error>
+parse_arg_id(basic_string_view<wchar_t>& ctx) {
     throw "not yet implemented";
 }
 
+template <class CharT>
 struct get_replacement_field {
-    constexpr std::optional<replacement_field> operator()(
-          replacement_field::arg_id_t id_) const noexcept {
-        return replacement_field{id_};
+    constexpr std::optional<replacement_field<CharT>> operator()(
+          typename replacement_field<CharT>::arg_id_t id_) const noexcept {
+        return replacement_field<CharT>{id_};
     }
-    constexpr std::optional<replacement_field> operator()(std::nullopt_t) const
-          noexcept {
-        return replacement_field{replacement_field::auto_val()};
+    constexpr std::optional<replacement_field<CharT>> operator()(
+          std::nullopt_t) const noexcept {
+        return replacement_field<CharT>{replacement_field<CharT>::auto_val()};
     }
-    constexpr std::optional<replacement_field> operator()(error) const
+    constexpr std::optional<replacement_field<CharT>> operator()(error) const
           noexcept {
         return std::nullopt;
     }
 };
 
 template <class CharT>
-constexpr std::optional<replacement_field> parse_replacement_field(
-      basic_format_parse_context<CharT>& ctx) {
-    return std::visit(get_replacement_field{}, parse_arg_id(ctx));
+constexpr std::optional<replacement_field<CharT>> parse_replacement_field(
+      basic_string_view<CharT>& fmt) {
+    auto field = std::visit(get_replacement_field<CharT>{}, parse_arg_id(fmt));
+    if (!field)
+        return std::nullopt;
+    if (consume(fmt, static_cast<CharT>(':'))) {
+    }
+    return field;
 }
 
 template <class CharT>
@@ -548,35 +573,33 @@ struct double_rbrace<wchar_t> {
 };
 
 template <class CharT>
-constexpr result parse_next(basic_format_parse_context<CharT>& context) {
-    if (context.begin() == context.end())
+constexpr result<CharT> parse_next(basic_string_view<CharT>& fmt) {
+    if (fmt.empty())
         return end{};
 
-    if (consume(context, double_lbrace<CharT>::value))
+    if (consume(fmt, double_lbrace<CharT>::value))
         return escaped_lbrace{};
-    if (consume(context, double_rbrace<CharT>::value))
+    if (consume(fmt, double_rbrace<CharT>::value))
         return escaped_rbrace{};
 
     using Traits = typename basic_string_view<CharT>::traits_type;
     using Iterator = typename basic_string_view<CharT>::const_iterator;
     static_assert(std::is_same_v<Iterator, const CharT*>, "this won't work");
 
-    const std::size_t context_size =
-          std::distance(context.begin(), context.end());
-    auto ctx_find = [&](CharT c) -> Iterator {
-        auto result = Traits::find(context.begin(), context_size, c);
-        return result ? result : context.end();
+    auto fmt_find = [&](CharT c) -> Iterator {
+        const CharT* result = Traits::find(fmt.begin(), fmt.size(), c);
+        return result ? result : fmt.end();
     };
 
-    const auto next_lbrace_it = ctx_find(static_cast<CharT>('{'));
-    if (next_lbrace_it != context.begin()) {
-        context.advance_to(next_lbrace_it);
+    const auto next_lbrace_it = fmt_find(static_cast<CharT>('{'));
+    if (next_lbrace_it != fmt.begin()) {
+        advance_to(fmt, next_lbrace_it);
         return text{};
     }
 
-    consume(context, static_cast<CharT>('{'));
-    const auto result = parse_replacement_field(context);
-    if (!result || !consume(context, static_cast<CharT>('}')))
+    consume(fmt, static_cast<CharT>('{'));
+    const auto result = parse_replacement_field(fmt);
+    if (!result || !consume(fmt, static_cast<CharT>('}')))
         return error{};
     return *result;
 }
@@ -629,12 +652,12 @@ Out vformat_to_impl(Out out,
                     basic_string_view<CharT> fmt,
                     format_args_t<Out, CharT>& args) {
     basic_format_context<Out, CharT> context(args, out);
-    basic_format_parse_context<CharT> parse_context(fmt);
+    unsigned current_arg_id = 0;
 
     namespace p = parse_fmt_str;
     while (true) {
-        auto old_begin = parse_context.begin();
-        p::result r = p::parse_next(parse_context);
+        auto old_begin = fmt.begin();
+        p::result<CharT> r = p::parse_next(fmt);
         if (std::holds_alternative<p::end>(r))
             return out;
         if (std::holds_alternative<p::error>(r))
@@ -647,7 +670,7 @@ Out vformat_to_impl(Out out,
                               basic_string_view<CharT>{
                                     old_begin,
                                     static_cast<std::size_t>(std::distance(
-                                          old_begin, parse_context.begin()))},
+                                          old_begin, fmt.begin()))},
                               out);
                     },
                     [&](p::escaped_lbrace) {
@@ -658,13 +681,17 @@ Out vformat_to_impl(Out out,
                         const CharT c = static_cast<CharT>('}');
                         fmt_out::text_out(basic_string_view<CharT>{&c, 1}, out);
                     },
-                    [&](p::replacement_field field) {
+                    [&](p::replacement_field<CharT> field) {
+                        basic_format_parse_context<CharT> parse_context(
+                              field.format_spec, context.args_size());
+                        parse_context._next_arg_id = current_arg_id;
                         fmt_out::arg_out(
                               context, parse_context,
                               context.arg(field.is_auto()
                                                 ? parse_context.next_arg_id()
                                                 : field.arg_id),
                               out);
+                        current_arg_id = parse_context.next_arg_id();
                     }},
               r);
     }
