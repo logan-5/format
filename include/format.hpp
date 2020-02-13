@@ -317,16 +317,20 @@ struct basic_format_arg {
 
 template <class Visitor, class Context>
 auto visit_format_arg(Visitor&& visitor, basic_format_arg<Context> arg) {
+    using CharT = typename basic_format_arg<Context>::char_type;
     // TODO
     if (auto* val = std::get_if<typename basic_format_arg<Context>::handle>(
               &arg.value))
         return visitor(*val);
-    if (auto* val = std::get_if<typename basic_format_arg<Context>::char_type>(
-              &arg.value))
+    if (auto* val = std::get_if<CharT>(&arg.value))
         return visitor(*val);
     if (auto* val = std::get_if<std::monostate>(&arg.value))
         return visitor(*val);
     if (auto* val = std::get_if<int>(&arg.value))
+        return visitor(*val);
+    if (auto* val = std::get_if<basic_string_view<CharT>>(&arg.value))
+        return visitor(*val);
+    if (auto* val = std::get_if<const CharT*>(&arg.value))
         return visitor(*val);
     throw;
 }
@@ -753,6 +757,48 @@ constexpr std_format_spec<CharT> parse(
 
 }  // namespace parse_std_format_spec
 
+struct write_single_char {
+    template <class CharT, class Out>
+    constexpr Out operator()(CharT c, Out out) const
+          noexcept(noexcept(*++out = c)) {
+        *++out = c;
+        return out;
+    }
+};
+struct write_repeated_char {
+    std::size_t count;
+    template <class CharT, class Out>
+    constexpr Out operator()(CharT c, Out out) const
+          noexcept(noexcept(*++out = c)) {
+        std::size_t n = count;
+        while (n--)
+            *++out = c;
+        return out;
+    }
+};
+struct write_string {
+    template <class CharT, class Traits, class Out>
+    constexpr Out operator()(std::basic_string_view<CharT, Traits> str,
+                             Out out) const
+          noexcept(noexcept(*++out = std::declval<CharT>())) {
+        for (CharT c : str)
+            *++out = c;
+        return out;
+    }
+};
+
+struct get_length {
+    template <class CharT>
+    constexpr std::size_t operator()(CharT) const noexcept {
+        return 1;
+    }
+    template <class CharT>
+    constexpr std::size_t operator()(basic_string_view<CharT> s) const
+          noexcept {
+        return s.size();
+    }
+};
+
 template <class CharT>
 struct std_format_parser {
     parse_std_format_spec::std_format_spec<CharT> format_spec;
@@ -805,7 +851,7 @@ struct std_format_parser {
                     return n - 1;
             }
         }();
-        return fmt_out::chars_out(format_spec.fill, count, out);
+        return write_repeated_char{count}(format_spec.fill, out);
     }
     template <typename Out>
     constexpr Out write_right_padding(std::size_t content_len,
@@ -827,7 +873,20 @@ struct std_format_parser {
                     return 0;
             }
         }();
-        return fmt_out::chars_out(format_spec.fill, count, out);
+        return write_repeated_char{count}(format_spec.fill, out);
+    }
+
+    template <class Out, class FormatFunc, class Writer = write_string>
+    constexpr Out do_format(basic_format_context<Out, CharT>& fc,
+                            const FormatFunc& f,
+                            const Writer& writer = {}) {
+        const auto width = get_width(fc);
+        const auto formatted = f();
+        const auto flength = get_length{}(formatted);
+        fc.advance_to(write_left_padding(flength, width, fc.out()));
+        fc.advance_to(writer(formatted, fc.out()));
+        fc.advance_to(write_right_padding(flength, width, fc.out()));
+        return fc.out();
     }
 };
 
@@ -842,42 +901,111 @@ struct formatter_impl {
     formatter_impl& operator=(const formatter_impl&) = delete;
 };
 
+template <class C, class CharT>
+struct char_formatter_impl : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    struct get_char {
+        C c;
+        constexpr C operator()() const noexcept { return c; }
+    };
+
+    template <typename Out>
+    constexpr typename basic_format_context<Out, CharT>::iterator format(
+          C c,
+          basic_format_context<Out, CharT>& fc) {
+        return base::do_format(fc, get_char{c}, write_single_char{});
+    }
+};
 template <class CharT>
-struct formatter_impl<CharT, CharT, true> : public std_format_parser<CharT> {
+struct formatter_impl<CharT, CharT, true>
+    : public char_formatter_impl<CharT, CharT> {};
+template <>
+struct formatter_impl<char, wchar_t, true>
+    : public char_formatter_impl<char, wchar_t> {};
+
+template <class CharT, class Traits>
+struct get_str {
+    std::basic_string_view<CharT, Traits> s;
+    std::basic_string_view<CharT, Traits> operator()() const noexcept {
+        return s;
+    }
+};
+template <class CharT>
+struct formatter_impl<CharT*, CharT, true> : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
     template <typename Out>
     typename basic_format_context<Out, CharT>::iterator format(
-          CharT c,
+          CharT* s,
           basic_format_context<Out, CharT>& fc) {
-        using base = std_format_parser<CharT>;
-        const auto width = base::get_width(fc);
-        fc.advance_to(base::write_left_padding(1, width, fc.out()));
-        fc.out() = c;
-        fc.advance_to(base::write_right_padding(1, width, fc.out()));
-
-        return fc.out();
+        using Traits = std::char_traits<CharT>;
+        return base::do_format(fc, get_str<CharT, Traits>{s});
+    }
+};
+template <class CharT>
+struct formatter_impl<const CharT*, CharT, true>
+    : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    template <typename Out>
+    typename basic_format_context<Out, CharT>::iterator format(
+          const CharT* s,
+          basic_format_context<Out, CharT>& fc) {
+        using Traits = std::char_traits<CharT>;
+        return base::do_format(fc, get_str<CharT, Traits>{s});
+    }
+};
+template <class CharT, std::size_t N>
+struct formatter_impl<const CharT[N], CharT, true>
+    : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    template <typename Out>
+    typename basic_format_context<Out, CharT>::iterator format(
+          const CharT* s,
+          basic_format_context<Out, CharT>& fc) {
+        using Traits = std::char_traits<CharT>;
+        return base::do_format(fc, get_str<CharT, Traits>{s});
+    }
+};
+template <class CharT, class Traits, class Alloc>
+struct formatter_impl<std::basic_string<CharT, Traits, Alloc>, CharT, true>
+    : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    template <typename Out>
+    typename basic_format_context<Out, CharT>::iterator format(
+          std::basic_string<CharT, Traits> s,
+          basic_format_context<Out, CharT>& fc) {
+        return base::do_format(fc, get_str<CharT, Traits>{s});
+    }
+};
+template <class CharT, class Traits>
+struct formatter_impl<std::basic_string_view<CharT, Traits>, CharT, true>
+    : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    template <typename Out>
+    typename basic_format_context<Out, CharT>::iterator format(
+          std::basic_string_view<CharT, Traits> s,
+          basic_format_context<Out, CharT>& fc) {
+        return base::do_format(fc, get_str<CharT, Traits>{s});
     }
 };
 
 template <class CharT>
 struct formatter_impl<int, CharT, true> : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    struct get_int {
+        std::array<CharT, 32> buf;
+        get_int(int i) {
+            using Traits = std::char_traits<CharT>;
+            Traits::assign(buf[0], '\0');
+        }
+        basic_string_view<CharT> operator()() const noexcept {
+            return buf.data();
+        }
+    };
     template <typename Out>
     typename basic_format_context<Out, CharT>::iterator format(
           int i,
           basic_format_context<Out, CharT>& fc) {
-        using base = std_format_parser<CharT>;
-        const auto width = base::get_width(fc);
-        const std::basic_string<CharT> istr = [i] {
-            if constexpr (std::is_same_v<CharT, char>)
-                return std::to_string(i);
-            else
-                return std::to_wstring(i);
-        }();
-        fc.advance_to(base::write_left_padding(istr.size(), width, fc.out()));
-        fc.advance_to(
-              fmt_out::text_out(basic_string_view<CharT>(istr), fc.out()));
-        fc.advance_to(base::write_right_padding(istr.size(), width, fc.out()));
-
-        return fc.out();
+        return base::do_format(fc, get_int{i});
     }
 };
 

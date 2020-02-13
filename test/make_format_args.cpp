@@ -18,6 +18,11 @@ TEST_CASE("make_format_args", "") {
     REQUIRE(format("{:}ello, {:}orld\n", 'h', 'w') == "hello, world\n");
 
     {
+        REQUIRE(format("{}", "hey") == "hey");
+        REQUIRE(format("{0: ^6}", "hey") == " hey  ");
+        REQUIRE(format("{:_>6}", "hey") == "___hey");
+    }
+    {
         char c = 120;
         // REQUIRE(format("{:6}", 42) == "    42");
         REQUIRE(format("{:6}", 'x') == "x     ");
