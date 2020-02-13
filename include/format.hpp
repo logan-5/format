@@ -326,6 +326,9 @@ auto visit_format_arg(Visitor&& visitor, basic_format_arg<Context> arg) {
         return visitor(*val);
     if (auto* val = std::get_if<std::monostate>(&arg.value))
         return visitor(*val);
+    if (auto* val = std::get_if<int>(&arg.value))
+        return visitor(*val);
+    throw;
 }
 
 namespace detail {
@@ -406,6 +409,14 @@ struct overloaded : public F... {
 template <typename... F>
 overloaded(F...)->overloaded<F...>;
 
+namespace fmt_out {
+template <class CharT, class Out>
+Out text_out(basic_string_view<CharT> text, Out out);
+
+template <class CharT, class Out>
+Out chars_out(CharT c, std::size_t count, Out out);
+}  // namespace fmt_out
+
 namespace parse_utils {
 
 template <class CharT>
@@ -466,7 +477,23 @@ typename basic_string_view<CharT>::iterator find(basic_string_view<CharT> fmt,
           "this won't work");
     const CharT* result = Traits::find(fmt.begin(), fmt.size(), c);
     return result ? result : fmt.end();
-};
+}
+
+template <class CharT>
+typename basic_string_view<CharT>::iterator find_balanced_delimiter_end(
+      basic_string_view<CharT> fmt,
+      CharT start,
+      CharT end,
+      std::size_t start_count = 1) {
+    auto it = fmt.cbegin();
+    for (; it != fmt.cend(); ++it) {
+        if (*it == start)
+            ++start_count;
+        else if (*it == end && --start_count == 0)
+            break;
+    }
+    return it;
+}
 
 }  // namespace parse_utils
 
@@ -525,7 +552,7 @@ enum type_t : char {
 
 template <class CharT>
 struct std_format_spec {
-    CharT fill{};
+    CharT fill{' '};
     alignment_t align{};
     bool alternate = false;
     sign_t sign{};
@@ -647,6 +674,7 @@ constexpr std::optional<integer_or_arg_id> parse_integer_or_arg_id(
                 return arg_id_t{*i};
             }
         } else if (consume(next, static_cast<CharT>('}'))) {
+            fmt = next;
             return arg_id_t{parse_context.next_arg_id()};
         }
     }
@@ -735,6 +763,72 @@ struct std_format_parser {
             throw format_error("bad standard format spec string");
         return pc.begin();
     }
+
+    template <typename Out>
+    constexpr std::size_t get_width(basic_format_context<Out, CharT>& fc) {
+        return std::visit(
+              [&fc](auto w) {
+                  if constexpr (std::is_same_v<decltype(w), std::size_t>) {
+                      return w;
+                  } else {
+                      return visit_format_arg(
+                            [](auto arg) -> std::size_t {
+                                if constexpr (std::is_integral_v<decltype(
+                                                    arg)>) {
+                                    return arg;
+                                } else {
+                                    throw format_error("width is not integral");
+                                }
+                            },
+                            fc.arg(w._id));
+                  }
+              },
+              format_spec.width.i);
+    }
+    template <typename Out>
+    constexpr Out write_left_padding(std::size_t content_len,
+                                     std::size_t width,
+                                     Out out) {
+        if (content_len >= width)
+            return out;
+        const auto n = width - content_len;
+        const auto count = [&]() -> std::size_t {
+            namespace p = parse_std_format_spec;
+            switch (format_spec.align) {
+                case p::alignment_t::center:
+                    return n / 2;
+                case p::alignment_t::left:
+                    return 0;
+                case p::alignment_t::right:
+                    return n;
+                case p::alignment_t::after_sign:
+                    return n - 1;
+            }
+        }();
+        return fmt_out::chars_out(format_spec.fill, count, out);
+    }
+    template <typename Out>
+    constexpr Out write_right_padding(std::size_t content_len,
+                                      std::size_t width,
+                                      Out out) {
+        if (content_len >= width)
+            return out;
+        const auto n = width - content_len;
+        const auto count = [&]() -> std::size_t {
+            namespace p = parse_std_format_spec;
+            switch (format_spec.align) {
+                case p::alignment_t::center:
+                    return n - n / 2;
+                case p::alignment_t::left:
+                    return n;
+                case p::alignment_t::right:
+                    return 0;
+                case p::alignment_t::after_sign:
+                    return 0;
+            }
+        }();
+        return fmt_out::chars_out(format_spec.fill, count, out);
+    }
 };
 
 template <class T>
@@ -754,21 +848,38 @@ struct formatter_impl<CharT, CharT, true> : public std_format_parser<CharT> {
     typename basic_format_context<Out, CharT>::iterator format(
           CharT c,
           basic_format_context<Out, CharT>& fc) {
+        using base = std_format_parser<CharT>;
+        const auto width = base::get_width(fc);
+        fc.advance_to(base::write_left_padding(1, width, fc.out()));
         fc.out() = c;
+        fc.advance_to(base::write_right_padding(1, width, fc.out()));
 
         return fc.out();
     }
 };
 
-// template <class CharT>
-// struct formatter_impl<int, CharT, true> {
-//     template <t
+template <class CharT>
+struct formatter_impl<int, CharT, true> : public std_format_parser<CharT> {
+    template <typename Out>
+    typename basic_format_context<Out, CharT>::iterator format(
+          int i,
+          basic_format_context<Out, CharT>& fc) {
+        using base = std_format_parser<CharT>;
+        const auto width = base::get_width(fc);
+        const std::basic_string<CharT> istr = [i] {
+            if constexpr (std::is_same_v<CharT, char>)
+                return std::to_string(i);
+            else
+                return std::to_wstring(i);
+        }();
+        fc.advance_to(base::write_left_padding(istr.size(), width, fc.out()));
+        fc.advance_to(
+              fmt_out::text_out(basic_string_view<CharT>(istr), fc.out()));
+        fc.advance_to(base::write_right_padding(istr.size(), width, fc.out()));
 
-//     template <typename Out>
-//     typename basic_format_context<Out, CharT>::iterator format(
-//           int i,
-//           basic_format_context<Out, CharT>& fc);
-// };
+        return fc.out();
+    }
+};
 
 }  // namespace detail
 
@@ -830,7 +941,8 @@ constexpr std::optional<replacement_field<CharT>> parse_replacement_field(
     if (!field)
         return std::nullopt;
     if (consume(fmt, static_cast<CharT>(':'))) {
-        auto format_spec_end = find(fmt, static_cast<CharT>('}'));
+        auto format_spec_end = find_balanced_delimiter_end(
+              fmt, static_cast<CharT>('{'), static_cast<CharT>('}'));
         field->format_spec = basic_string_view<CharT>(
               fmt.begin(), std::distance(fmt.begin(), format_spec_end));
         advance_to(fmt, format_spec_end);
@@ -887,9 +999,17 @@ constexpr result<CharT> parse_next(basic_string_view<CharT>& fmt) {
 
 namespace fmt_out {
 template <class CharT, class Out>
-void text_out(basic_string_view<CharT> text, Out out) {
+Out text_out(basic_string_view<CharT> text, Out out) {
     for (auto& c : text)
         *++out = c;
+    return out;
+}
+
+template <class CharT, class Out>
+Out chars_out(CharT c, std::size_t count, Out out) {
+    while (count--)
+        *++out = c;
+    return out;
 }
 
 template <typename T, typename Ret = void>
