@@ -428,8 +428,12 @@ Out chars_out(CharT c, std::size_t count, Out out);
 namespace parse_utils {
 
 template <class CharT>
+constexpr bool match_nonempty(basic_string_view<CharT> fmt, CharT c) {
+    return fmt[0] == c;
+}
+template <class CharT>
 constexpr bool match(basic_string_view<CharT> fmt, CharT c) {
-    return !fmt.empty() && fmt[0] == c;
+    return !fmt.empty() && match_nonempty(fmt, c);
 }
 template <class CharT>
 constexpr bool consume(basic_string_view<CharT>& fmt,
@@ -638,30 +642,40 @@ inline std::wstring dump(const std_format_spec<wchar_t>&) {
 }
 
 template <class CharT>
+constexpr std::optional<alignment_t> parse_align(
+      basic_string_view<CharT>& fmt) noexcept {
+    if (consume(fmt, static_cast<CharT>('<'))) {
+        return alignment_t::left;
+    }
+    if (consume(fmt, static_cast<CharT>('>'))) {
+        return alignment_t::right;
+    }
+    if (consume(fmt, static_cast<CharT>('='))) {
+        return alignment_t::after_sign;
+    }
+    if (consume(fmt, static_cast<CharT>('^'))) {
+        return alignment_t::center;
+    }
+    return std::nullopt;
+}
+
+template <class CharT>
 constexpr std::optional<std::pair<CharT, alignment_t>> parse_fill_and_align(
       basic_string_view<CharT>& fmt) {
-    if (fmt.size() < 2)
+    assert(!fmt.empty());
+    if (match_nonempty(fmt, static_cast<CharT>('{')) ||
+        match_nonempty(fmt, static_cast<CharT>('}')))
         return std::nullopt;
-    const CharT fill = fmt[0];
-    if (fill == static_cast<CharT>('{') || fill == static_cast<CharT>('}'))
-        return std::nullopt;
-    auto next = fmt.substr(1);
-    auto advance = [&fmt] { fmt.remove_prefix(2); };
-    if (match(next, static_cast<CharT>('<'))) {
-        advance();
-        return std::make_pair(fill, alignment_t::left);
+    if (fmt.size() >= 2) {
+        auto next = fmt.substr(1);
+        if (const auto align = parse_align(next)) {
+            const CharT fill = fmt[0];
+            fmt = next;
+            return std::make_pair(fill, *align);
+        }
     }
-    if (match(next, static_cast<CharT>('>'))) {
-        advance();
-        return std::make_pair(fill, alignment_t::right);
-    }
-    if (match(next, static_cast<CharT>('='))) {
-        advance();
-        return std::make_pair(fill, alignment_t::after_sign);
-    }
-    if (match(next, static_cast<CharT>('^'))) {
-        advance();
-        return std::make_pair(fill, alignment_t::center);
+    if (const auto align = parse_align(fmt)) {
+        return std::make_pair(' ', *align);
     }
     return std::nullopt;
 }

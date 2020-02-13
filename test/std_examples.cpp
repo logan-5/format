@@ -112,15 +112,15 @@ TEST_CASE("std_examples", "") {
     }
 
     {
-          // clang-format off
+        // clang-format off
         // TODO
         // char c = 120;
         // REQUIRE(format("{:+06d}", c) == "+00120");
         // REQUIRE(format("{:#06x}", 0xa) == "0x000a");
-          // clang-format on
+        // clang-format on
 
-          // REQUIRE(format("{:<06}", -42) ==
-          //         "-42   ");  // (0 is ignored because of < alignment)
+        REQUIRE(format("{:<06}", -42) ==
+                "-42   ");  // (0 is ignored because of < alignment)
     }
 
     {
