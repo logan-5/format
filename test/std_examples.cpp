@@ -78,7 +78,7 @@ TEST_CASE("std_examples", "") {
 
     {
         [[maybe_unused]] char c = 120;
-        // REQUIRE(format("{:6}", 42) == "    42");
+        REQUIRE(format("{:6}", 42) == "    42");
         REQUIRE(format("{:6}", 'x') == "x     ");
         REQUIRE(format("{:*<6}", 'x') == "x*****");
         REQUIRE(format("{:*>6}", 'x') == "*****x");
@@ -90,10 +90,10 @@ TEST_CASE("std_examples", "") {
         // REQUIRE(format("{:=6}", 'x');    // Error: '=' with charT and no integer presentation type
 
         // TODO
-        // REQUIRE(format("{:6d}", c) == "   120");
+        REQUIRE(format("{:6d}", c) == "   120");
         // REQUIRE(format("{:=+06d}", c) == "+00120")
         // REQUIRE(format("{:0=#6x}", 0xa) == "0x000a");
-        // REQUIRE(format("{:6}", true) == "true  ");
+        REQUIRE(format("{:6}", true) == "true  ");
         // clang-format on
     }
 
@@ -117,17 +117,19 @@ TEST_CASE("std_examples", "") {
         // char c = 120;
         // REQUIRE(format("{:+06d}", c) == "+00120");
         // REQUIRE(format("{:#06x}", 0xa) == "0x000a");
-        // REQUIRE(format("{:<06}", -42) ==
-        //         "-42   ");  // (0 is ignored because of < alignment)
           // clang-format on
+
+          // REQUIRE(format("{:<06}", -42) ==
+          //         "-42   ");  // (0 is ignored because of < alignment)
     }
 
     {
         REQUIRE(format("{}", 42) == "42");
+        REQUIRE(format("{0:b} {0:d} {0:o} {0:x}", 42) == "101010 42 52 2a");
+        REQUIRE(format("{0:#x} {0:#X}", 42) == "0x2a 0X2A");
+
         // clang-format off
         // TODO
-        // REQUIRE(format("{0:b} {0:d} {0:o} {0:x}", 42) == "101010 42 52 2a");
-        // REQUIRE(format("{0:#x} {0:#X}", 42) == "0x2a 0X2A");
         // REQUIRE(format("{:L}", 1234) == "1,234");  // (depending on the locale)
         // clang-format on
     }

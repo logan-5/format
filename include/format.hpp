@@ -330,6 +330,8 @@ auto visit_format_arg(Visitor&& visitor, basic_format_arg<Context> arg) {
         return visitor(*val);
     if (auto* val = std::get_if<int>(&arg.value))
         return visitor(*val);
+    if (auto* val = std::get_if<bool>(&arg.value))
+        return visitor(*val);
     if (auto* val = std::get_if<basic_string_view<CharT>>(&arg.value))
         return visitor(*val);
     if (auto* val = std::get_if<const CharT*>(&arg.value))
@@ -517,25 +519,27 @@ struct arg_id_t {
     }
 };
 
-namespace parse_std_format_spec {
-
-using namespace parse_utils;
-
+namespace std_format_spec_types {
 using integer_or_arg_id = std::variant<std::size_t, arg_id_t>;
 
 enum class alignment_t : char {
+    defaulted,
     left,
     right,
     center,
     after_sign,
 };
+inline constexpr bool is_defaulted(alignment_t a) noexcept {
+    return a == alignment_t::defaulted;
+}
+
 enum class sign_t : char { plus, minus, space };
 struct width_t {
     integer_or_arg_id i{};
     bool zero_pad = false;
 };
-enum type_t : char {
-    none = ' ',
+enum class type_t : char {
+    defaulted = ' ',
     a = 'a',
     A = 'A',
     b = 'b',
@@ -555,16 +559,26 @@ enum type_t : char {
     x = 'x',
     X = 'X',
 };
+inline constexpr bool is_defaulted(type_t t) noexcept {
+    return t == type_t::defaulted;
+}
+
+}  // namespace std_format_spec_types
+
+namespace parse_std_format_spec {
+
+using namespace parse_utils;
+using namespace std_format_spec_types;
 
 template <class CharT>
 struct std_format_spec {
     CharT fill{' '};
-    alignment_t align{};
+    alignment_t align{alignment_t::defaulted};
     bool alternate = false;
     sign_t sign{};
     width_t width;
     integer_or_arg_id precision;
-    type_t type{type_t::none};
+    type_t type{type_t::defaulted};
 };
 
 inline std::string dump(const std_format_spec<char>& s) {
@@ -834,60 +848,77 @@ struct std_format_parser {
               format_spec.width.i);
     }
     template <typename Out>
-    constexpr Out write_left_padding(std::size_t content_len,
-                                     std::size_t width,
-                                     Out out) {
+    static constexpr Out write_left_padding(
+          std::size_t content_len,
+          std::size_t width,
+          Out out,
+          std_format_spec_types::alignment_t align,
+          CharT fill) {
         if (content_len >= width)
             return out;
         const auto n = width - content_len;
         const auto count = [&]() -> std::size_t {
-            namespace p = parse_std_format_spec;
-            switch (format_spec.align) {
-                case p::alignment_t::center:
+            using A = std_format_spec_types::alignment_t;
+            switch (align) {
+                case A::center:
                     return n / 2;
-                case p::alignment_t::left:
+                case A::left:
                     return 0;
-                case p::alignment_t::right:
+                case A::right:
                     return n;
-                case p::alignment_t::after_sign:
+                case A::after_sign:
                     return n - 1;
+                case A::defaulted:
+                    LRSTD_UNREACHABLE();
             }
         }();
-        return write_repeated_char{count}(format_spec.fill, out);
+        return write_repeated_char{count}(fill, out);
     }
     template <typename Out>
-    constexpr Out write_right_padding(std::size_t content_len,
-                                      std::size_t width,
-                                      Out out) {
+    static constexpr Out write_right_padding(
+          std::size_t content_len,
+          std::size_t width,
+          Out out,
+          std_format_spec_types::alignment_t align,
+          CharT fill) {
         if (content_len >= width)
             return out;
         const auto n = width - content_len;
         const auto count = [&]() -> std::size_t {
-            namespace p = parse_std_format_spec;
-            switch (format_spec.align) {
-                case p::alignment_t::center:
+            using A = std_format_spec_types::alignment_t;
+            switch (align) {
+                case A::center:
                     return n - n / 2;
-                case p::alignment_t::left:
+                case A::left:
                     return n;
-                case p::alignment_t::right:
+                case A::right:
                     return 0;
-                case p::alignment_t::after_sign:
+                case A::after_sign:
                     return 0;
+                case A::defaulted:
+                    LRSTD_UNREACHABLE();
             }
         }();
-        return write_repeated_char{count}(format_spec.fill, out);
+        return write_repeated_char{count}(fill, out);
     }
 
     template <class Out, class FormatFunc, class Writer = write_string>
     constexpr Out do_format(basic_format_context<Out, CharT>& fc,
-                            const FormatFunc& f,
+                            FormatFunc&& f,
                             const Writer& writer = {}) {
         const auto width = get_width(fc);
-        const auto formatted = f();
+        const auto type = is_defaulted(format_spec.type) ? f.default_type()
+                                                         : format_spec.type;
+        const auto align = is_defaulted(format_spec.align)
+                                 ? f.default_alignment(type)
+                                 : format_spec.align;
+        const auto formatted = f(type, format_spec.alternate);
         const auto flength = get_length{}(formatted);
-        fc.advance_to(write_left_padding(flength, width, fc.out()));
+        fc.advance_to(write_left_padding(flength, width, fc.out(), align,
+                                         format_spec.fill));
         fc.advance_to(writer(formatted, fc.out()));
-        fc.advance_to(write_right_padding(flength, width, fc.out()));
+        fc.advance_to(write_right_padding(flength, width, fc.out(), align,
+                                          format_spec.fill));
         return fc.out();
     }
 };
@@ -903,33 +934,170 @@ struct formatter_impl {
     formatter_impl& operator=(const formatter_impl&) = delete;
 };
 
-template <class C, class CharT>
-struct char_formatter_impl : public std_format_parser<CharT> {
-    using base = std_format_parser<CharT>;
-    struct get_char {
-        C c;
-        constexpr C operator()() const noexcept { return c; }
-    };
+//////////////////////////////
+// integer formatters
 
-    template <typename Out>
-    constexpr typename basic_format_context<Out, CharT>::iterator format(
-          C c,
-          basic_format_context<Out, CharT>& fc) {
-        return base::do_format(fc, get_char{c}, write_single_char{});
+template <class Int>
+struct format_int_storage_type {
+    using type = Int;
+};
+template <>
+struct format_int_storage_type<bool> {
+    using type = char;
+};
+
+template <class Int>
+struct format_int {
+    typename format_int_storage_type<Int>::type i;
+    std::array<char, sizeof(Int) * 8 + 2> buf;
+
+    constexpr std::string_view operator()(std_format_spec_types::type_t type,
+                                          bool write_prefix) {
+        using Traits = std::char_traits<char>;
+        auto to_chars = [this, write_prefix](
+                              int base,
+                              std::string_view prefix) -> std::string_view {
+            auto start = std::begin(buf);
+            if (write_prefix) {
+                Traits::copy(start, prefix.data(), prefix.size());
+                std::advance(start, prefix.size());
+            }
+            const auto result = std::to_chars(start, std::end(buf), i, base);
+            assert(result.ec == std::errc());
+            return std::string_view(std::begin(buf),
+                                    std::distance(std::begin(buf), result.ptr));
+        };
+        using T = std_format_spec_types::type_t;
+        switch (type) {
+            case T::x:
+                return to_chars(16, "0x");
+            case T::X: {
+                auto result = to_chars(16, "0X");
+                convert_to_upper();
+                return result;
+            }
+            case T::b:
+                return to_chars(2, "0b");
+            case T::B:
+                return to_chars(2, "0B");
+
+            case T::d:
+                return to_chars(10, "");
+            case T::o:
+                return to_chars(8, "0");
+            case std_format_spec_types::type_t::c:
+                if (i < std::numeric_limits<char>::min() ||
+                    std::numeric_limits<char>::max() < i)
+                    throw format_error(
+                          "integer is not in representable range of char");
+                Traits::assign(buf[0], static_cast<char>(i));
+                return std::string_view(buf.data(), 1);
+
+            case T::n:
+                throw "TODO";
+
+            case T::s:
+                if constexpr (std::is_same_v<Int, bool>) {
+                    const std::string_view s =
+                          static_cast<bool>(i) ? "true" : "false";
+                    Traits::copy(std::begin(buf), s.data(), s.size());
+                    return std::string_view(std::begin(buf), s.size());
+                }
+                [[fallthrough]];
+            case T::a:
+            case T::A:
+            case T::e:
+            case T::E:
+            case T::f:
+            case T::F:
+            case T::g:
+            case T::G:
+            case T::p:
+                throw format_error("invalid formatting type for integer");
+
+            case T::defaulted:
+                break;
+        }
+        LRSTD_UNREACHABLE();
+    }
+
+    static constexpr std_format_spec_types::type_t default_type() noexcept {
+        if constexpr (is_char_or_wchar_v<Int>) {
+            return std_format_spec_types::type_t::c;
+        } else if constexpr (std::is_same_v<Int, bool>) {
+            return std_format_spec_types::type_t::s;
+        } else {
+            return std_format_spec_types::type_t::d;
+        }
+    }
+    static constexpr std_format_spec_types::alignment_t default_alignment(
+          std_format_spec_types::type_t type) noexcept {
+        using A = std_format_spec_types::alignment_t;
+        if constexpr (is_char_or_wchar_v<Int> || std::is_same_v<Int, bool>) {
+            return is_integer_type(type) ? A::right : A::left;
+        } else {
+            return A::right;
+        }
+    }
+
+   private:
+    constexpr void convert_to_upper() {
+        std::transform(std::begin(buf), std::end(buf), std::begin(buf),
+                       [](char c) { return std::toupper(c); });
+    }
+
+    static constexpr bool is_integer_type(
+          std_format_spec_types::type_t type) noexcept {
+        constexpr std::string_view types = "xXbBdon";
+        return types.find(static_cast<char>(type)) != std::string_view::npos;
     }
 };
+
+template <class Int, class CharT>
+struct int_formatter : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    template <typename Out>
+    typename basic_format_context<Out, CharT>::iterator format(
+          Int i,
+          basic_format_context<Out, CharT>& fc) {
+        return base::do_format(fc, format_int<Int>{i});
+    }
+};
+
+template <class CharT>
+struct formatter_impl<int, CharT, true> : public int_formatter<int, CharT> {};
+
+template <class CharT>
+struct formatter_impl<bool, CharT, true> : public int_formatter<bool, CharT> {};
+
 template <class CharT>
 struct formatter_impl<CharT, CharT, true>
-    : public char_formatter_impl<CharT, CharT> {};
+    : public int_formatter<CharT, CharT> {};
 template <>
 struct formatter_impl<char, wchar_t, true>
-    : public char_formatter_impl<char, wchar_t> {};
+    : public int_formatter<char, wchar_t> {};
+
+//////////////////////////////
+// string formatters
 
 template <class CharT, class Traits>
 struct get_str {
     std::basic_string_view<CharT, Traits> s;
-    std::basic_string_view<CharT, Traits> operator()() const noexcept {
+    constexpr std::basic_string_view<CharT, Traits> operator()(
+          std_format_spec_types::type_t type,
+          bool) const {
+        if (type != std_format_spec_types::type_t::s &&
+            type != std_format_spec_types::type_t::defaulted)
+            throw format_error("invalid type spec for formatting string");
         return s;
+    }
+
+    static constexpr std_format_spec_types::type_t default_type() noexcept {
+        return std_format_spec_types::type_t::s;
+    }
+    static constexpr std_format_spec_types::alignment_t default_alignment(
+          std_format_spec_types::type_t) noexcept {
+        return std_format_spec_types::alignment_t::left;
     }
 };
 template <class CharT>
@@ -987,36 +1155,6 @@ struct formatter_impl<std::basic_string_view<CharT, Traits>, CharT, true>
           std::basic_string_view<CharT, Traits> s,
           basic_format_context<Out, CharT>& fc) {
         return base::do_format(fc, get_str<CharT, Traits>{s});
-    }
-};
-
-template <class CharT>
-struct formatter_impl<int, CharT, true> : public std_format_parser<CharT> {
-    using base = std_format_parser<CharT>;
-    struct get_int {
-        std::array<CharT, 32> buf;
-        get_int(int i) {
-            using Traits = std::char_traits<CharT>;
-            // TODO!!
-            std::basic_string<CharT> s = [&] {
-                if constexpr (std::is_same_v<CharT, char>)
-                    return std::to_string(i);
-                else
-                    return std::to_wstring(i);
-            }();
-            assert(s.size() < buf.size());
-            Traits::copy(buf.data(), s.data(), s.size());
-            Traits::assign(buf[s.size()], '\0');
-        }
-        basic_string_view<CharT> operator()() const noexcept {
-            return buf.data();
-        }
-    };
-    template <typename Out>
-    typename basic_format_context<Out, CharT>::iterator format(
-          int i,
-          basic_format_context<Out, CharT>& fc) {
-        return base::do_format(fc, get_int{i});
     }
 };
 
@@ -1283,7 +1421,7 @@ std::string format(std::string_view fmt, const Args&... args) {
 }
 
 template <class... Args>
-std::string format(std::wstring_view fmt, const Args&... args) {
+std::wstring format(std::wstring_view fmt, const Args&... args) {
     return vformat(fmt, {make_wformat_args(args...)});
 }
 
