@@ -723,7 +723,7 @@ template <class CharT>
 constexpr std::optional<integer_or_arg_id> parse_precision(
       basic_string_view<CharT>& fmt,
       basic_format_parse_context<CharT>& parse_context) {
-    if (match(fmt, '.')) {
+    if (match(fmt, static_cast<CharT>('.'))) {
         auto next = fmt.substr(1);
         if (auto result = parse_integer_or_arg_id<true>(next, parse_context)) {
             fmt = next;
@@ -994,7 +994,6 @@ struct format_int {
                 return to_chars(2, "0b");
             case T::B:
                 return to_chars(2, "0B");
-
             case T::d:
                 return to_chars(10, "");
             case T::o:
@@ -1004,7 +1003,7 @@ struct format_int {
                     std::numeric_limits<char>::max() < i)
                     throw format_error(
                           "integer is not in representable range of char");
-                Traits::assign(buf[0], static_cast<char>(i));
+                buf[0] = static_cast<char>(i);
                 return std::string_view(buf.data(), 1);
 
             case T::n:
@@ -1018,15 +1017,11 @@ struct format_int {
                     return std::string_view(std::begin(buf), s.size());
                 }
                 [[fallthrough]];
-            case T::a:
-            case T::A:
-            case T::e:
-            case T::E:
-            case T::f:
-            case T::F:
-            case T::g:
-            case T::G:
-            case T::p:
+
+                // clang-format off
+            case T::a: case T::A: case T::e: case T::E: case T::f: 
+            case T::F: case T::g: case T::G: case T::p:
+                // clang-format on
                 throw format_error("invalid formatting type for integer");
 
             case T::defaulted:
