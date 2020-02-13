@@ -224,6 +224,8 @@ struct basic_format_arg {
                 fc.advance_to(f.format(*static_cast<const T*>(ptr), fc));
             }} {}
 
+        friend struct basic_format_arg;
+
        public:
         void format(basic_format_parse_context<char_type>& pc,
                     Context& fc) const {
@@ -467,7 +469,7 @@ inline std::variant<std::size_t, std::nullopt_t, error> parse_integer(
 }
 
 inline std::variant<std::size_t, std::nullopt_t, error> parse_integer(
-      basic_string_view<wchar_t>& fmt) {
+      basic_string_view<wchar_t>&) {
     throw "not yet implemented";
 }
 
@@ -995,7 +997,16 @@ struct formatter_impl<int, CharT, true> : public std_format_parser<CharT> {
         std::array<CharT, 32> buf;
         get_int(int i) {
             using Traits = std::char_traits<CharT>;
-            Traits::assign(buf[0], '\0');
+            // TODO!!
+            std::basic_string<CharT> s = [&] {
+                if constexpr (std::is_same_v<CharT, char>)
+                    return std::to_string(i);
+                else
+                    return std::to_wstring(i);
+            }();
+            assert(s.size() < buf.size());
+            Traits::copy(buf.data(), s.data(), s.size());
+            Traits::assign(buf[s.size()], '\0');
         }
         basic_string_view<CharT> operator()() const noexcept {
             return buf.data();
@@ -1011,7 +1022,7 @@ struct formatter_impl<int, CharT, true> : public std_format_parser<CharT> {
 
 }  // namespace detail
 
-template <typename T, typename Char>
+template <typename T, typename Char = char>
 struct formatter : public detail::formatter_impl<T, Char> {};
 
 namespace detail {
@@ -1050,11 +1061,11 @@ template <class CharT>
 struct get_replacement_field {
     constexpr std::optional<replacement_field<CharT>> operator()(
           std::size_t id_) const noexcept {
-        return replacement_field<CharT>{arg_id_t{id_}};
+        return replacement_field<CharT>{arg_id_t{id_}, {}};
     }
     constexpr std::optional<replacement_field<CharT>> operator()(
           std::nullopt_t) const noexcept {
-        return replacement_field<CharT>{arg_id_t::auto_id()};
+        return replacement_field<CharT>{arg_id_t::auto_id(), {}};
     }
     constexpr std::optional<replacement_field<CharT>> operator()(error) const
           noexcept {
@@ -1116,7 +1127,8 @@ constexpr result<CharT> parse_next(basic_string_view<CharT>& fmt) {
         return text{};
     }
 
-    consume(fmt, static_cast<CharT>('{'));
+    // beginning is '{'
+    fmt.remove_prefix(1);
     const auto result = parse_replacement_field(fmt);
     if (!result || !consume(fmt, static_cast<CharT>('}')))
         return error{};
@@ -1147,11 +1159,10 @@ struct throw_uninitialized_format_arg {
     }
 };
 
-template <class Context, class Out, class CharT>
+template <class Context, class CharT>
 void arg_out(Context& fc,
              basic_format_parse_context<CharT>& pc,
-             const basic_format_arg<Context>& arg,
-             Out out) {
+             const basic_format_arg<Context>& arg) {
     visit_format_arg(
           overloaded{
                 throw_uninitialized_format_arg<std::monostate>{},
@@ -1179,7 +1190,7 @@ Out vformat_to_impl(Out out,
                     basic_string_view<CharT> fmt,
                     format_args_t<Out, CharT>& args) {
     basic_format_context<Out, CharT> context(args, out);
-    unsigned current_arg_id = 0;
+    basic_format_parse_context<CharT> parse_context(fmt, context.args_size());
 
     namespace p = parse_fmt_str;
     while (true) {
@@ -1209,16 +1220,15 @@ Out vformat_to_impl(Out out,
                         fmt_out::text_out(basic_string_view<CharT>{&c, 1}, out);
                     },
                     [&](p::replacement_field<CharT> field) {
-                        basic_format_parse_context<CharT> parse_context(
-                              field.format_spec, context.args_size());
-                        parse_context._next_arg_id = current_arg_id;
+                        parse_context._begin = field.format_spec.begin();
+                        parse_context._end = field.format_spec.end();
                         fmt_out::arg_out(
                               context, parse_context,
                               context.arg(field.arg_id.is_auto()
                                                 ? parse_context.next_arg_id()
-                                                : field.arg_id._id),
-                              out);
-                        current_arg_id = parse_context.next_arg_id();
+                                                : (parse_context.check_arg_id(
+                                                         field.arg_id._id),
+                                                   field.arg_id._id)));
                     }},
               r);
     }
@@ -1250,15 +1260,13 @@ Out vformat_to(Out out,
 
 template <class Out, class... Args>
 Out format_to(Out out, std::string_view fmt, const Args&... args) {
-    using Context = basic_format_context<
-          Out, format_args_t<Out, std::string_view::value_type>>;
+    using Context = basic_format_context<Out, std::string_view::value_type>;
     return vformat_to(out, fmt, {make_format_args<Context>(args...)});
 }
 
 template <class Out, class... Args>
 Out format_to(Out out, std::wstring_view fmt, const Args&... args) {
-    using Context = basic_format_context<
-          Out, format_args_t<Out, std::wstring_view::value_type>>;
+    using Context = basic_format_context<Out, std::wstring_view::value_type>;
     return vformat_to(out, fmt, {make_format_args<Context>(args...)});
 }
 
