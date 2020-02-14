@@ -16,7 +16,7 @@ namespace lrstd {
 #define LRSTD_UNREACHABLE() __builtin_unreachable()
 #define LRSTD_ASSERT(...) assert(__VA_ARGS__)
 
-#define LRSTD_USE_EXTRA_CONSTEXPR false
+// #define LRSTD_USE_EXTRA_CONSTEXPR false
 
 #if LRSTD_USE_EXTRA_CONSTEXPR
 #define LRSTD_EXTRA_CONSTEXPR constexpr
@@ -817,7 +817,8 @@ constexpr std_format_spec<CharT> parse(
         return r;
 
     if (const auto fill_and_align = parse_fill_and_align(fmt)) {
-        std::tie(r.fill, r.align) = *fill_and_align;
+        r.fill = fill_and_align->first;
+        r.align = fill_and_align->second;
     }
     if (const auto sign = parse_sign(fmt)) {
         r.sign = *sign;

@@ -16,8 +16,6 @@ constexpr bool equal(const Range& range, InputIt2 first2) noexcept {
     return true;
 }
 
-#if LRSTD_USE_EXTRA_CONSTEXPR
-
 #define PASTE2(X, Y) X##Y
 #define PASTE(X, Y) PASTE2(X, Y)
 
@@ -30,16 +28,5 @@ constexpr bool equal(const Range& range, InputIt2 first2) noexcept {
     }();                                                             \
     static_assert(PASTE(f, __LINE__))
 
-#else
-#define CONSTEXPR_TEST(...)
-#endif
-
 CONSTEXPR_TEST("hello, world\n", "{}ello, {}orld\n", 'h', 'w');
-
-TEST_CASE("constexpr", "") {
-    {
-        std::array<char, 128> buf{};
-        lrstd::format_to(buf.begin(), "{}ello, {}orld\n", 'h', 'w');
-        REQUIRE(std::string_view(buf.data()) == "hello, world\n");
-    }
-}
+CONSTEXPR_TEST("1234534*", "12{0}5{0:*<3}", "34");
