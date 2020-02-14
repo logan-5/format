@@ -7,14 +7,16 @@
 #include <string_view>
 #include <vector>
 
+template <class Char>
 struct SV {
     template <std::size_t N>
-    std::string_view operator()(const std::array<char, N>& arr) const {
-        return std::string_view{arr.data()};
+    std::basic_string_view<Char> operator()(
+          const std::array<Char, N>& arr) const {
+        return {arr.data()};
     }
     template <class C>
-    std::string_view operator()(const C& c) const {
-        return std::string_view{std::data(c), std::size(c)};
+    std::basic_string_view<Char> operator()(const C& c) const {
+        return {std::data(c), std::size(c)};
     }
 };
 
@@ -22,7 +24,7 @@ TEST_CASE("output", "") {
     using namespace std::string_view_literals;
     using namespace lrstd;
 
-    SV sv;
+    SV<char> sv;
 
     {
         std::array<char, 128> chars{};
@@ -65,5 +67,56 @@ TEST_CASE("output", "") {
         REQUIRE(chars ==
                 "the transport will be outfitted for a journey spanning future "
                 "generations");
+    }
+}
+
+TEST_CASE("output_wide", "") {
+    using namespace std::string_view_literals;
+    using namespace lrstd;
+
+    SV<wchar_t> sv;
+
+    {
+        std::array<wchar_t, 128> chars{};
+        format_to(chars.begin(), L"unavoidable paradigm");
+        REQUIRE(sv(chars) == L"unavoidable paradigm");
+        format_to(chars.begin(), L"the system is {1} free from {0}", L"error",
+                  L"now");
+        REQUIRE(sv(chars) == L"the system is now free from error");
+    }
+    {
+        std::vector<wchar_t> chars;
+        format_to(std::back_inserter(chars), L"the {}", L"system");
+        REQUIRE(sv(chars) == L"the system");
+        format_to(std::back_inserter(chars), L" revokes our {} form", L"viral");
+        REQUIRE(sv(chars) == L"the system revokes our viral form");
+    }
+    {
+        std::wstring chars;
+        format_to(std::back_inserter(chars), L"the {}", L"radiant sun");
+        REQUIRE(chars == L"the radiant sun");
+        format_to(std::back_inserter(chars), L" engraves its {}", L"name");
+        REQUIRE(chars == L"the radiant sun engraves its name");
+    }
+    {
+        std::wstring chars;
+        std::wstring fmt = L"we cannot see past the {} shroud";
+        format_to(std::back_inserter(chars), fmt, L"solar");
+        REQUIRE(chars == L"we cannot see past the solar shroud");
+        chars.clear();
+        format_to(std::back_inserter(chars), fmt, fmt);
+        REQUIRE(chars ==
+                L"we cannot see past the we cannot see past the {} shroud "
+                L"shroud");
+    }
+    {
+        std::wstring chars =
+              L"___ transport will be outfitted for a journey spanning future "
+              L"generations";
+        format_to(chars.begin(), L"the {}", sv(chars).substr(4));
+        REQUIRE(
+              chars ==
+              L"the transport will be outfitted for a journey spanning future "
+              L"generations");
     }
 }
