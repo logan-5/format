@@ -77,22 +77,15 @@ TEST_CASE("std_examples", "") {
     }
 
     {
-        [[maybe_unused]] char c = 120;
+        char c = 120;
         REQUIRE(format("{:6}", 42) == "    42");
         REQUIRE(format("{:6}", 'x') == "x     ");
         REQUIRE(format("{:*<6}", 'x') == "x*****");
         REQUIRE(format("{:*>6}", 'x') == "*****x");
         REQUIRE(format("{:*^6}", 'x') == "**x***");
         REQUIRE(format("{:*^{}}", 'x', 6) == "**x***");
-
-        // clang-format off
-
-        // REQUIRE(format("{:=6}", 'x');    // Error: '=' with charT and no integer presentation type
-
-        // TODO
         REQUIRE(format("{:6d}", c) == "   120");
         REQUIRE(format("{:6}", true) == "true  ");
-        // clang-format on
     }
 
     {
@@ -110,15 +103,10 @@ TEST_CASE("std_examples", "") {
     }
 
     {
-        // clang-format off
-        // TODO
-        // char c = 120;
-        // REQUIRE(format("{:+06d}", c) == "+00120");
-        // REQUIRE(format("{:#06x}", 0xa) == "0x000a");
-        // clang-format on
-
-        REQUIRE(format("{:<06}", -42) ==
-                "-42   ");  // (0 is ignored because of < alignment)
+        char c = 120;
+        REQUIRE(format("{:+06d}", c) == "+00120");
+        REQUIRE(format("{:#06x}", 0xa) == "0x000a");
+        REQUIRE(format("{:<06}", -42) == "-42   ");
     }
 
     {
