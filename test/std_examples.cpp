@@ -91,8 +91,6 @@ TEST_CASE("std_examples", "") {
 
         // TODO
         REQUIRE(format("{:6d}", c) == "   120");
-        // REQUIRE(format("{:=+06d}", c) == "+00120")
-        // REQUIRE(format("{:0=#6x}", 0xa) == "0x000a");
         REQUIRE(format("{:6}", true) == "true  ");
         // clang-format on
     }
