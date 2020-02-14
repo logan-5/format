@@ -231,24 +231,43 @@ template <class It>
 inline constexpr bool hack_is_contiguous_iterator_v =
       hack_is_contiguous_iterator<It>::value;
 
-struct contiguous_iterator_tag : std::output_iterator_tag {};
-template <class It, bool = hack_is_contiguous_iterator_v<It>>
-struct cpp20_iterator_category {
-    using type = typename std::iterator_traits<It>::iterator_category;
-};
-template <class It>
-struct cpp20_iterator_category<It, true> {
-    using type = contiguous_iterator_tag;
-};
-
 template <class T>
 constexpr T* to_raw_pointer(T* ptr) noexcept {
     return ptr;
 }
-template <class It,
-          typename = std::enable_if_t<hack_is_contiguous_iterator_v<It>>>
+template <class It, class = std::enable_if_t<hack_is_contiguous_iterator_v<It>>>
 constexpr auto* to_raw_pointer(It it) noexcept(noexcept(&*it)) {
     return &*it;
+}
+
+template <class It, class = void>
+struct maybe_to_raw_pointer_impl {
+    constexpr It operator()(It it) const noexcept { return it; }
+};
+template <class It>
+struct maybe_to_raw_pointer_impl<
+      It,
+      std::void_t<decltype(to_raw_pointer(std::declval<It>()))>> {
+    constexpr auto* operator()(It it) const
+          noexcept(noexcept(to_raw_pointer(it))) {
+        return to_raw_pointer(it);
+    }
+};
+
+template <class It>
+constexpr auto maybe_to_raw_pointer(It it) noexcept(
+      noexcept(maybe_to_raw_pointer_impl<It>{}(it))) {
+    return maybe_to_raw_pointer_impl<It>{}(it);
+}
+
+template <class It, class T>
+constexpr It to_iter(T* ptr, It it) noexcept(
+      noexcept(std::next(it, std::distance(to_raw_pointer(it), ptr)))) {
+    return std::next(it, std::distance(to_raw_pointer(it), ptr));
+}
+template <class It, class = std::enable_if_t<!std::is_pointer_v<It>>>
+constexpr It to_iter(It ptr, It) noexcept {
+    return ptr;
 }
 
 }  // namespace detail
@@ -899,143 +918,74 @@ constexpr std_format_spec<CharT> parse(
 
 }  // namespace parse_std_format_spec
 
-struct generic_writer {
-    template <class CharT,
-              class Out,
-              class Category = typename cpp20_iterator_category<Out>::type>
-    constexpr Out operator()(CharT c, Out out) const
-          noexcept(noexcept(write_single_char(c, out, Category{}))) {
-        return write_single_char(c, out, Category{});
-    }
+struct single_char_writer {
     template <class CharT, class Out>
-    static constexpr Out write_single_char(
-          CharT c,
-          Out out,
-          std::output_iterator_tag) noexcept(noexcept(*out++ = c)) {
+    constexpr Out operator()(CharT c, Out out) const
+          noexcept(noexcept(*out++ = c)) {
         *out++ = c;
         return out;
     }
-    template <class CharT, class Out, class Traits = std::char_traits<CharT>>
-    static constexpr Out write_single_char(
-          CharT c,
-          Out out,
-          contiguous_iterator_tag) noexcept(noexcept(Traits::assign(*out++,
-                                                                    c))) {
+    template <class CharT, class Traits = std::char_traits<CharT>>
+    constexpr CharT* operator()(CharT c, CharT* out) const
+          noexcept(noexcept(Traits::assign(*out++, c))) {
         Traits::assign(*out++, c);
         return out;
-    }
-
-    template <class CharT,
-              class Out,
-              class Category = typename cpp20_iterator_category<Out>::type>
-    constexpr Out operator()(CharT c, std::size_t count, Out out) const
-          noexcept(noexcept(write_repeated_char(c, count, out, Category{}))) {
-        return write_repeated_char(c, count, out, Category{});
-    }
+    };
+};
+struct repeated_char_writer {
     template <class CharT, class Out>
-    static constexpr Out write_repeated_char(
-          CharT c,
-          std::size_t count,
-          Out out,
-          std::output_iterator_tag) noexcept(noexcept(*out++ = c)) {
+    constexpr Out operator()(CharT c, std::size_t count, Out out) const
+          noexcept(noexcept(*out++ = c)) {
         while (count--)
             *out++ = c;
         return out;
     }
-    template <class CharT, class Out, class Traits = std::char_traits<CharT>>
-    static constexpr Out write_repeated_char(
-          CharT c,
-          std::size_t count,
-          Out out,
-          contiguous_iterator_tag) noexcept(noexcept(Traits::
-                                                           assign(
-                                                                 to_raw_pointer(
-                                                                       out),
-                                                                 count,
-                                                                 c))) {
-#if LRSTD_USE_EXTRA_CONSTEXPR
-        return write_repeated_char(c, count, out, std::output_iterator_tag{});
-#else
-        Traits::assign(to_raw_pointer(out), count, c);
+#if !LRSTD_USE_EXTRA_CONSTEXPR
+    template <class CharT, class Traits = std::char_traits<CharT>>
+    constexpr CharT* operator()(CharT c, std::size_t count, CharT* out) const
+          noexcept(noexcept(Traits::assign(out, count, c))) {
+        Traits::assign(out, count, c);
         return out + count;
-#endif
     }
+#endif
+};
 
+struct str_writer_common {
     template <class CharT, class Traits, class Out>
-    static constexpr Out write_str(
-          std::basic_string_view<CharT, Traits> str,
-          Out out,
-          std::output_iterator_tag) noexcept(noexcept(*out++ =
-                                                            std::declval<
-                                                                  CharT&>())) {
+    constexpr Out operator()(std::basic_string_view<CharT, Traits> str,
+                             Out out) const
+          noexcept(noexcept(*out++ = std::declval<CharT&>())) {
         for (CharT c : str)
             *out++ = c;
         return out;
     }
 };
-
-struct nonoverlapping_writer : generic_writer {
-    using generic_writer::operator();
-    using generic_writer::write_str;
-    template <class CharT,
-              class Traits,
-              class Out,
-              class Category = typename cpp20_iterator_category<Out>::type>
-    constexpr Out operator()(std::basic_string_view<CharT, Traits> str,
-                             Out out) const
-          noexcept(noexcept(this->write_str(str, out, Category{}))) {
-        return this->write_str(str, out, Category{});
-    }
-
-    template <class CharT,
-              class Traits,
-              class Out,
-              class = std::enable_if_t<std::is_same_v<
-                    decltype(to_raw_pointer(std::declval<Out>())),
-                    CharT*>>>
-    static constexpr Out write_str(std::basic_string_view<CharT, Traits> str,
-                                   Out out,
-                                   contiguous_iterator_tag) noexcept(false) {
-#if LRSTD_USE_EXTRA_CONSTEXPR
-        return write_str(str, out, std::output_iterator_tag{});
-#else
-        std::char_traits<CharT>::copy(to_raw_pointer(out), str.data(),
-                                      str.size());
+struct overlapping_str_writer : str_writer_common {
+    using str_writer_common::operator();
+#if !LRSTD_USE_EXTRA_CONSTEXPR
+    template <class CharT, class Traits>
+    constexpr CharT* operator()(std::basic_string_view<CharT, Traits> str,
+                                CharT* out) const noexcept(false) {
+        std::char_traits<CharT>::move(out, str.data(), str.size());
         return out + str.size();
+    }
 #endif
-    }
 };
-struct overlapping_writer : generic_writer {
-    using generic_writer::operator();
-    using generic_writer::write_str;
-    template <class CharT,
-              class Traits,
-              class Out,
-              class Category = typename cpp20_iterator_category<Out>::type>
-    constexpr Out operator()(std::basic_string_view<CharT, Traits> str,
-                             Out out) const
-          noexcept(noexcept(write_str(str, out, Category{}))) {
-        return write_str(str, out, Category{});
-    }
 
-    template <class CharT,
-              class Traits,
-              class Out,
-              class = std::enable_if_t<std::is_same_v<
-                    decltype(to_raw_pointer(std::declval<Out>())),
-                    CharT*>>>
-    static constexpr Out write_str(std::basic_string_view<CharT, Traits> str,
-                                   Out out,
-                                   contiguous_iterator_tag) noexcept(false) {
-#if LRSTD_USE_EXTRA_CONSTEXPR
-        return write_str(str, out, std::output_iterator_tag{});
-#else
-        std::char_traits<CharT>::move(to_raw_pointer(out), str.data(),
-                                      str.size());
+struct nonoverlapping_str_writer : str_writer_common {
+    using str_writer_common::operator();
+#if !LRSTD_USE_EXTRA_CONSTEXPR
+    template <class CharT, class Traits>
+    constexpr CharT* operator()(std::basic_string_view<CharT, Traits> str,
+                                CharT* out) const noexcept(false) {
+        std::char_traits<CharT>::copy(out, str.data(), str.size());
         return out + str.size();
-#endif
     }
+#endif
 };
+using nonoverlapping_generic_writer = overloaded<nonoverlapping_str_writer,
+                                                 single_char_writer,
+                                                 repeated_char_writer>;
 
 struct sign_char {
     constexpr char operator()(std_format_spec_types::sign_t sign,
@@ -1095,7 +1045,8 @@ struct std_format_parser {
           const CharT sign_char,
           const CharT fill_char) noexcept {
         const bool has_sign = sign_char != '\0';
-        auto write_sign_and_prefix = [&, writer = nonoverlapping_writer{}] {
+        nonoverlapping_generic_writer writer;
+        auto write_sign_and_prefix = [&] {
             return writer(prefix, has_sign ? writer(sign_char, out) : out);
         };
 
@@ -1110,7 +1061,7 @@ struct std_format_parser {
             width = width > prefix_width ? width - prefix_width : 0;
             const auto zero_count =
                   width > value_width ? width - value_width : 0;
-            return generic_writer{}(static_cast<CharT>('0'), zero_count, out);
+            return writer(static_cast<CharT>('0'), zero_count, out);
         }
 
         LRSTD_ASSERT(align == alignment_t::right ||
@@ -1121,7 +1072,7 @@ struct std_format_parser {
             const auto fill_count = align == alignment_t::right
                                           ? padding_chars
                                           : padding_chars / 2;
-            out = generic_writer{}(fill_char, fill_count, out);
+            out = writer(fill_char, fill_count, out);
         }
         return write_sign_and_prefix();
     }
@@ -1139,12 +1090,12 @@ struct std_format_parser {
         switch (align) {
             case alignment_t::center: {
                 const auto padding_chars = width - value_and_prefix_width;
-                return generic_writer{}(
+                return repeated_char_writer{}(
                       fill, padding_chars / 2 + (padding_chars & 1), out);
             }
             case alignment_t::left: {
                 const auto padding_chars = width - value_and_prefix_width;
-                return generic_writer{}(fill, padding_chars, out);
+                return repeated_char_writer{}(fill, padding_chars, out);
             }
             case alignment_t::right:
                 return out;
@@ -1155,11 +1106,11 @@ struct std_format_parser {
     }
 
     template <class Out, class FormatFunc, class Writer>
-    constexpr Out do_format(basic_format_context<Out, CharT>& fc,
+    constexpr Out do_format(Out out,
+                            const std::size_t width,
                             FormatFunc&& f,
                             Writer&& writer) {
         using namespace std_format_spec_types;
-        const std::size_t width = get_width(fc);
         const type_t type = is_defaulted(format_spec.type) ? f.default_type()
                                                            : format_spec.type;
         const bool default_align = is_defaulted(format_spec.align);
@@ -1177,14 +1128,14 @@ struct std_format_parser {
         }
         const std::string_view prefix =
               f.get_prefix(type, format_spec.alternate);
-        fc.advance_to(write_prefix(fc.out(), width, value_width, prefix, align,
-                                   zero_pad, sign, format_spec.fill));
-        fc.advance_to(writer(formatted, fc.out()));
+        out = write_prefix(out, width, value_width, prefix, align, zero_pad,
+                           sign, format_spec.fill);
+        out = writer(formatted, out);
         const std::size_t value_and_prefix_width =
               value_width + prefix.size() + (sign != '\0');
-        fc.advance_to(write_suffix(fc.out(), width, value_and_prefix_width,
-                                   align, zero_pad, format_spec.fill));
-        return fc.out();
+        out = write_suffix(out, width, value_and_prefix_width, align, zero_pad,
+                           format_spec.fill);
+        return out;
     }
 };
 
@@ -1222,9 +1173,10 @@ struct format_int {
             const auto result =
                   std::to_chars(std::begin(buf), std::end(buf), i, base);
             LRSTD_ASSERT(result.ec == std::errc());
-            const auto start = std::next(
-                  std::begin(buf), is_negative());  // skip minus sign, if any.
-                                                    // already taken care of
+            const auto start =
+                  std::next(std::begin(buf),
+                            is_negative());  // skip minus sign, if any.
+                                             // already taken care of
             return std::string_view(start, std::distance(start, result.ptr));
         };
         using T = std_format_spec_types::type_t;
@@ -1249,7 +1201,7 @@ struct format_int {
                     std::numeric_limits<char>::max() < i)
                     throw format_error(
                           "integer is not in representable range of char");
-                nonoverlapping_writer{}(static_cast<char>(i), buf.data());
+                single_char_writer{}(static_cast<char>(i), buf.data());
                 return std::string_view(buf.data(), 1);
 
             case T::n:
@@ -1259,7 +1211,7 @@ struct format_int {
                 if constexpr (std::is_same_v<Int, bool>) {
                     const std::string_view s =
                           static_cast<bool>(i) ? "true" : "false";
-                    nonoverlapping_writer{}(s, buf.data());
+                    nonoverlapping_str_writer{}(s, buf.data());
                     return std::string_view(std::begin(buf), s.size());
                 }
                 [[fallthrough]];
@@ -1331,20 +1283,13 @@ struct format_int {
                 return "0B";
             case T::o:
                 return "0";
-            case T::d:
-            case T::c:
-            case T::n:
-            case T::s:
-            case T::a:
-            case T::A:
-            case T::e:
-            case T::E:
-            case T::f:
-            case T::F:
-            case T::g:
-            case T::G:
+
+                // clang-format off
+            case T::d: case T::c: case T::n: case T::s: case T::a: case T::A:
+            case T::e: case T::E: case T::f: case T::F: case T::g: case T::G:
             case T::p:
                 return {};
+                // clang-format on
 
             case T::defaulted:
                 break;
@@ -1372,7 +1317,12 @@ struct int_formatter : public std_format_parser<CharT> {
     constexpr typename basic_format_context<Out, CharT>::iterator format(
           Int i,
           basic_format_context<Out, CharT>& fc) {
-        return base::do_format(fc, format_int<Int>{i}, nonoverlapping_writer{});
+        fc.advance_to(
+              to_iter(base::do_format(maybe_to_raw_pointer(fc.out()),
+                                      base::get_width(fc), format_int<Int>{i},
+                                      nonoverlapping_str_writer{}),
+                      fc.out()));
+        return fc.out();
     }
 };
 
@@ -1436,8 +1386,12 @@ struct str_formatter : public std_format_parser<CharT> {
           std::decay_t<Str> i,
           basic_format_context<Out, CharT>& fc) {
         using Traits = std::char_traits<CharT>;
-        return base::do_format(fc, format_str<CharT, Traits>{i},
-                               overlapping_writer{});
+        fc.advance_to(to_iter(
+              base::do_format(maybe_to_raw_pointer(fc.out()),
+                              base::get_width(fc), format_str<CharT, Traits>{i},
+                              overlapping_str_writer{}),
+              fc.out()));
+        return fc.out();
     }
 };
 
@@ -1625,7 +1579,7 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
               overloaded{
                     unreachable<p::end>{}, unreachable<p::error>{},
                     [&](p::text) {
-                        context.advance_to(overlapping_writer{}(
+                        context.advance_to(overlapping_str_writer{}(
                               basic_string_view<CharT>{
                                     old_begin,
                                     static_cast<std::size_t>(std::distance(
@@ -1634,12 +1588,12 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
                     },
                     [&](p::escaped_lbrace) {
                         const CharT c = static_cast<CharT>('{');
-                        context.advance_to(overlapping_writer{}(
+                        context.advance_to(overlapping_str_writer{}(
                               basic_string_view<CharT>{&c, 1}, context.out()));
                     },
                     [&](p::escaped_rbrace) {
                         const CharT c = static_cast<CharT>('}');
-                        context.advance_to(overlapping_writer{}(
+                        context.advance_to(overlapping_str_writer{}(
                               basic_string_view<CharT>{&c, 1}, context.out()));
                     },
                     [&](p::replacement_field<CharT> field) {
