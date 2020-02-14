@@ -27,11 +27,12 @@ TEST_CASE("output", "") {
     SV<char> sv;
 
     {
-        std::array<char, 128> chars{};
-        format_to(chars.begin(), "unavoidable paradigm");
+        std::array<char, 64> chars{};
+        REQUIRE(format_to(chars.begin(), "unavoidable paradigm") ==
+                std::next(chars.begin(), 20));
         REQUIRE(sv(chars) == "unavoidable paradigm");
-        format_to(chars.begin(), "the system is {1} free from {0}", "error",
-                  "now");
+        REQUIRE(format_to(chars.begin(), "the system is {1} free from {0}",
+                          "error", "now") == std::next(chars.begin(), 33));
         REQUIRE(sv(chars) == "the system is now free from error");
     }
     {
@@ -77,11 +78,12 @@ TEST_CASE("output_wide", "") {
     SV<wchar_t> sv;
 
     {
-        std::array<wchar_t, 128> chars{};
-        format_to(chars.begin(), L"unavoidable paradigm");
+        std::array<wchar_t, 64> chars{};
+        REQUIRE(format_to(chars.begin(), L"unavoidable paradigm") ==
+                std::next(chars.begin(), 20));
         REQUIRE(sv(chars) == L"unavoidable paradigm");
-        format_to(chars.begin(), L"the system is {1} free from {0}", L"error",
-                  L"now");
+        REQUIRE(format_to(chars.begin(), L"the system is {1} free from {0}",
+                          L"error", L"now") == std::next(chars.begin(), 33));
         REQUIRE(sv(chars) == L"the system is now free from error");
     }
     {

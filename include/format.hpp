@@ -1572,7 +1572,7 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
         auto old_begin = fmt.begin();
         p::result<CharT> r = p::parse_next(fmt);
         if (std::holds_alternative<p::end>(r))
-            return out;
+            break;
         if (std::holds_alternative<p::error>(r))
             throw format_error("bad format string");
         std::visit(
@@ -1608,7 +1608,8 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
                     }},
               r);
     }
-}  // namespace detail
+    return context.out();
+}
 
 template <class CharT>
 LRSTD_EXTRA_CONSTEXPR std::basic_string<CharT> vformat_impl(
