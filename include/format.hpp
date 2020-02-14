@@ -14,6 +14,15 @@
 namespace lrstd {
 
 #define LRSTD_UNREACHABLE() __builtin_unreachable()
+#define LRSTD_ASSERT(...) assert(__VA_ARGS__)
+
+#define LRSTD_USE_EXTRA_CONSTEXPR false
+
+#if LRSTD_USE_EXTRA_CONSTEXPR
+#define LRSTD_EXTRA_CONSTEXPR constexpr
+#else
+#define LRSTD_EXTRA_CONSTEXPR
+#endif
 
 // clang-format off
 /*
@@ -127,9 +136,9 @@ struct formatter;
 
 namespace detail {
 template <class CharT, class Out>
-Out vformat_to_impl(Out out,
-                    basic_string_view<CharT> fmt,
-                    format_args_t<Out, CharT>& args);
+LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
+                                          basic_string_view<CharT> fmt,
+                                          format_args_t<Out, CharT>& args);
 }  // namespace detail
 
 template <class CharT>
@@ -150,9 +159,10 @@ class basic_format_parse_context {
     void ncc() {}
 
     template <class C, class O>
-    friend O detail::vformat_to_impl(O out,
-                                     basic_string_view<C> fmt,
-                                     format_args_t<O, C>& args);
+    friend LRSTD_EXTRA_CONSTEXPR O
+    detail::vformat_to_impl(O out,
+                            basic_string_view<C> fmt,
+                            format_args_t<O, C>& args);
 
    public:
     explicit constexpr basic_format_parse_context(basic_string_view<CharT> fmt,
@@ -214,7 +224,7 @@ struct basic_format_arg {
                         const void*);
 
         template <class T>
-        explicit handle(const T& val) noexcept
+        explicit LRSTD_EXTRA_CONSTEXPR handle(const T& val) noexcept
             : _ptr{std::addressof(val)}
             , _format{[](basic_format_parse_context<char_type>& pc,
                          Context& fc,
@@ -227,8 +237,9 @@ struct basic_format_arg {
         friend struct basic_format_arg;
 
        public:
-        void format(basic_format_parse_context<char_type>& pc,
-                    Context& fc) const {
+        LRSTD_EXTRA_CONSTEXPR void format(
+              basic_format_parse_context<char_type>& pc,
+              Context& fc) const {
             _format(pc, fc, _ptr);
         }
     };
@@ -257,7 +268,7 @@ struct basic_format_arg {
                                    .format(std::declval<const T&>(),
                                            std::declval<Context&>())),
                     typename Context::iterator>>>
-    explicit basic_format_arg(const T& v) noexcept
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(const T& v) noexcept
         : value{[&] {
             if constexpr (std::is_same_v<T, bool> ||
                           std::is_same_v<T, char_type>) {
@@ -282,43 +293,49 @@ struct basic_format_arg {
             }
         }()} {}
 
-    explicit basic_format_arg(float n) noexcept
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(float n) noexcept
         : value{static_cast<double>(n)} {}
-    explicit basic_format_arg(double n) noexcept : value{n} {}
-    explicit basic_format_arg(long double n) noexcept : value{n} {}
-    explicit basic_format_arg(const char_type* s) : value{s} {}
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(double n) noexcept
+        : value{n} {}
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(long double n) noexcept
+        : value{n} {}
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(const char_type* s)
+        : value{s} {}
 
     template <class Traits>
-    explicit basic_format_arg(
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(
           std::basic_string_view<char_type, Traits> s) noexcept
         : value{s} {}
     template <class Traits, class Alloc>
-    explicit basic_format_arg(
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(
           const std::basic_string<char_type, Traits, Alloc>& s)
         : value{basic_string_view<char_type>{s.data(), s.size()}} {}
 
-    explicit basic_format_arg(std::nullptr_t)
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(std::nullptr_t)
         : value{static_cast<const void*>(nullptr)} {}
 
     template <class T, class = std::enable_if_t<std::is_void_v<T>>>
-    explicit basic_format_arg(T* p) : value{p} {}
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(T* p) : value{p} {}
 
     template <class Ctx, class... Args>
-    friend detail::args_storage<Ctx, Args...> make_format_args(const Args&...);
+    friend LRSTD_EXTRA_CONSTEXPR detail::args_storage<Ctx, Args...>
+    make_format_args(const Args&...);
 
     template <class Visitor, class Ctx>
-    friend auto visit_format_arg(Visitor&&, basic_format_arg<Ctx>);
+    friend LRSTD_EXTRA_CONSTEXPR auto visit_format_arg(Visitor&&,
+                                                       basic_format_arg<Ctx>);
 
    public:
-    basic_format_arg() noexcept = default;
+    LRSTD_EXTRA_CONSTEXPR basic_format_arg() noexcept = default;
 
-    explicit operator bool() const noexcept {
+    LRSTD_EXTRA_CONSTEXPR explicit operator bool() const noexcept {
         return std::holds_alternative<std::monostate>(value);
     }
 };
 
 template <class Visitor, class Context>
-auto visit_format_arg(Visitor&& visitor, basic_format_arg<Context> arg) {
+LRSTD_EXTRA_CONSTEXPR auto visit_format_arg(Visitor&& visitor,
+                                            basic_format_arg<Context> arg) {
     using CharT = typename basic_format_arg<Context>::char_type;
     // TODO
     if (auto* val = std::get_if<typename basic_format_arg<Context>::handle>(
@@ -355,14 +372,16 @@ class basic_format_args {
     friend class basic_format_context;
 
    public:
-    constexpr basic_format_args() noexcept : _size{0}, _data{nullptr} {}
+    LRSTD_EXTRA_CONSTEXPR basic_format_args() noexcept
+        : _size{0}, _data{nullptr} {}
 
     template <class... Args>
-    basic_format_args(
+    LRSTD_EXTRA_CONSTEXPR basic_format_args(
           const detail::args_storage<Context, Args...>& storage) noexcept
         : _size{storage.args.size()}, _data{storage.args.data()} {}
 
-    constexpr basic_format_arg<Context> get(std::size_t i) const noexcept {
+    LRSTD_EXTRA_CONSTEXPR basic_format_arg<Context> get(std::size_t i) const
+          noexcept {
         return i < _size ? _data[i] : basic_format_arg<Context>();
     }
 };
@@ -372,14 +391,16 @@ class basic_format_context {
     basic_format_args<basic_format_context> _args;
     Out _out;
 
-    basic_format_context(const basic_format_args<basic_format_context>& args,
-                         Out out)
+    LRSTD_EXTRA_CONSTEXPR basic_format_context(
+          const basic_format_args<basic_format_context>& args,
+          Out out)
         : _args{args}, _out{out} {}
 
     template <class C, class O>
-    friend O detail::vformat_to_impl(O out,
-                                     basic_string_view<C> fmt,
-                                     format_args_t<O, C>& args);
+    friend LRSTD_EXTRA_CONSTEXPR O
+    detail::vformat_to_impl(O out,
+                            basic_string_view<C> fmt,
+                            format_args_t<O, C>& args);
 
     constexpr std::size_t args_size() const { return _args._size; }
 
@@ -389,22 +410,24 @@ class basic_format_context {
     template <class T>
     using formatter_type = formatter<T, CharT>;
 
-    basic_format_arg<basic_format_context> arg(std::size_t id_) const {
+    LRSTD_EXTRA_CONSTEXPR basic_format_arg<basic_format_context> arg(
+          std::size_t id_) const {
         return _args.get(id_);
     }
 
-    iterator out() noexcept { return _out; }
-    void advance_to(iterator it) { _out = it; }
+    LRSTD_EXTRA_CONSTEXPR iterator out() noexcept { return _out; }
+    LRSTD_EXTRA_CONSTEXPR void advance_to(iterator it) { _out = it; }
 };
 
 template <class Context = format_context, class... Args>
-detail::args_storage<Context, Args...> make_format_args(const Args&... args) {
+LRSTD_EXTRA_CONSTEXPR detail::args_storage<Context, Args...> make_format_args(
+      const Args&... args) {
     return {basic_format_arg<Context>(args)...};
 }
 
 template <class... Args>
-detail::args_storage<wformat_context, Args...> make_wformat_args(
-      const Args&... args) {
+LRSTD_EXTRA_CONSTEXPR detail::args_storage<wformat_context, Args...>
+make_wformat_args(const Args&... args) {
     return make_format_args<wformat_context>(args...);
 }
 
@@ -419,10 +442,10 @@ overloaded(F...)->overloaded<F...>;
 
 namespace fmt_out {
 template <class CharT, class Out>
-Out text_out(basic_string_view<CharT> text, Out out);
+LRSTD_EXTRA_CONSTEXPR Out text_out(basic_string_view<CharT> text, Out out);
 
 template <class CharT, class Out>
-Out chars_out(CharT c, std::size_t count, Out out);
+LRSTD_EXTRA_CONSTEXPR Out chars_out(CharT c, std::size_t count, Out out);
 }  // namespace fmt_out
 
 namespace parse_utils {
@@ -455,16 +478,37 @@ constexpr bool consume(basic_string_view<CharT>& fmt, CharT c) {
     return false;
 }
 template <class CharT>
-void advance_to(basic_string_view<CharT>& s,
-                typename basic_string_view<CharT>::iterator pos) {
+constexpr void advance_to(basic_string_view<CharT>& s,
+                          typename basic_string_view<CharT>::iterator pos) {
     s.remove_prefix(std::distance(s.begin(), pos));
 }
 
 struct error {};
 
+#if LRSTD_USE_EXTRA_CONSTEXPR
+inline constexpr std::variant<std::size_t, std::nullopt_t, error> parse_integer(
+      basic_string_view<char>& fmt) {
+    basic_string_view<char>::iterator it = fmt.begin();
+    auto is_digit = [](char c) { return '0' <= c && c <= '9'; };
+    for (; it != fmt.end() && is_digit(*it); ++it)
+        ;
+    if (it == fmt.begin())
+        return std::nullopt;
+
+    std::size_t place_value = 1;
+    std::size_t ret = 0;
+    for (auto dig_it = std::make_reverse_iterator(it); dig_it != fmt.rend();
+         ++dig_it) {
+        ret += (*dig_it - '0') * place_value;
+        place_value *= 10;
+    }
+    advance_to(fmt, it);
+    return ret;
+}
+#else
 inline std::variant<std::size_t, std::nullopt_t, error> parse_integer(
       basic_string_view<char>& fmt) {
-    std::size_t val = 0;
+    std::size_t val;
     const auto result = std::from_chars(fmt.begin(), fmt.end(), val, 10);
     if (result.ptr == fmt.begin())
         return std::nullopt;
@@ -473,12 +517,25 @@ inline std::variant<std::size_t, std::nullopt_t, error> parse_integer(
     advance_to(fmt, result.ptr);
     return val;
 }
+#endif
 
 inline std::variant<std::size_t, std::nullopt_t, error> parse_integer(
       basic_string_view<wchar_t>&) {
     throw "not yet implemented";
 }
 
+#if LRSTD_USE_EXTRA_CONSTEXPR
+template <class CharT>
+constexpr typename basic_string_view<CharT>::iterator find(
+      basic_string_view<CharT> fmt,
+      CharT c) {
+    auto it = fmt.begin();
+    for (; it != fmt.end(); ++it)
+        if (*it == c)
+            break;
+    return it;
+}
+#else
 template <class CharT>
 typename basic_string_view<CharT>::iterator find(basic_string_view<CharT> fmt,
                                                  CharT c) {
@@ -490,13 +547,14 @@ typename basic_string_view<CharT>::iterator find(basic_string_view<CharT> fmt,
     const CharT* result = Traits::find(fmt.begin(), fmt.size(), c);
     return result ? result : fmt.end();
 }
+#endif
 
 template <class CharT>
-typename basic_string_view<CharT>::iterator find_balanced_delimiter_end(
-      basic_string_view<CharT> fmt,
-      CharT start,
-      CharT end,
-      std::size_t start_count = 1) {
+constexpr typename basic_string_view<CharT>::iterator
+find_balanced_delimiter_end(basic_string_view<CharT> fmt,
+                            CharT start,
+                            CharT end,
+                            std::size_t start_count = 1) {
     auto it = fmt.cbegin();
     for (; it != fmt.cend(); ++it) {
         if (*it == start)
@@ -655,7 +713,7 @@ constexpr std::optional<alignment_t> parse_align(
 template <class CharT>
 constexpr std::optional<std::pair<CharT, alignment_t>> parse_fill_and_align(
       basic_string_view<CharT>& fmt) {
-    assert(!fmt.empty());
+    LRSTD_ASSERT(!fmt.empty());
     if (match_nonempty(fmt, static_cast<CharT>('{')) ||
         match_nonempty(fmt, static_cast<CharT>('}')))
         return std::nullopt;
@@ -784,10 +842,10 @@ struct write_repeated_char {
     std::size_t count;
     template <class CharT, class Out>
     constexpr Out operator()(CharT c, Out out) const
-          noexcept(noexcept(*++out = c)) {
+          noexcept(noexcept(*out++ = c)) {
         std::size_t n = count;
         while (n--)
-            *++out = c;
+            *out++ = c;
         return out;
     }
 };
@@ -796,15 +854,15 @@ struct generic_writer {
     template <class CharT, class Traits, class Out>
     constexpr Out operator()(std::basic_string_view<CharT, Traits> str,
                              Out out) const
-          noexcept(noexcept(*++out = std::declval<CharT>())) {
+          noexcept(noexcept(*out++ = std::declval<CharT>())) {
         for (CharT c : str)
-            *++out = c;
+            *out++ = c;
         return out;
     }
     template <class CharT, class Out>
     constexpr Out operator()(CharT c, Out out) const
-          noexcept(noexcept(*++out = c)) {
-        *++out = c;
+          noexcept(noexcept(*out++ = c)) {
+        *out++ = c;
         return out;
     }
 };
@@ -850,22 +908,20 @@ struct std_format_parser {
     template <typename Out>
     constexpr std::size_t get_width(basic_format_context<Out, CharT>& fc) {
         return std::visit(
-              [&fc](auto w) {
-                  if constexpr (std::is_same_v<decltype(w), std::size_t>) {
-                      return w;
-                  } else {
-                      return visit_format_arg(
-                            [](auto arg) -> std::size_t {
-                                if constexpr (std::is_integral_v<decltype(
-                                                    arg)>) {
-                                    return arg;
-                                } else {
-                                    throw format_error("width is not integral");
-                                }
-                            },
-                            fc.arg(w._id));
-                  }
-              },
+              overloaded{[](std::size_t w) { return w; },
+                         [&](auto w) {
+                             return visit_format_arg(
+                                   [](auto arg) -> std::size_t {
+                                       if constexpr (std::is_integral_v<
+                                                           decltype(arg)>) {
+                                           return arg;
+                                       } else {
+                                           throw format_error(
+                                                 "width is not integral");
+                                       }
+                                   },
+                                   fc.arg(w._id));
+                         }},
               format_spec.width.i);
     }
 
@@ -899,7 +955,8 @@ struct std_format_parser {
                                                    out);
         }
 
-		assert(align == alignment_t::right || align == alignment_t::center);
+        LRSTD_ASSERT(align == alignment_t::right ||
+                     align == alignment_t::center);
         width = width > prefix_width ? width - prefix_width : 0;
         if (width > value_width) {
             const auto padding_chars = width - value_width;
@@ -1004,7 +1061,7 @@ struct format_int {
         auto to_chars = [this](int base) -> std::string_view {
             const auto result =
                   std::to_chars(std::begin(buf), std::end(buf), i, base);
-            assert(result.ec == std::errc());
+            LRSTD_ASSERT(result.ec == std::errc());
             const auto start = std::next(
                   std::begin(buf), is_negative());  // skip minus sign, if any.
                                                     // already taken care of
@@ -1152,7 +1209,7 @@ template <class Int, class CharT>
 struct int_formatter : public std_format_parser<CharT> {
     using base = std_format_parser<CharT>;
     template <typename Out>
-    typename basic_format_context<Out, CharT>::iterator format(
+    constexpr typename basic_format_context<Out, CharT>::iterator format(
           Int i,
           basic_format_context<Out, CharT>& fc) {
         return base::do_format(fc, format_int<Int>{i});
@@ -1210,63 +1267,34 @@ struct format_str {
         return {};
     }
 };
-template <class CharT>
-struct formatter_impl<CharT*, CharT, true> : public std_format_parser<CharT> {
+
+template <class Str, class CharT>
+struct str_formatter : public std_format_parser<CharT> {
     using base = std_format_parser<CharT>;
     template <typename Out>
-    typename basic_format_context<Out, CharT>::iterator format(
-          CharT* s,
+    constexpr typename basic_format_context<Out, CharT>::iterator format(
+          std::decay_t<Str> i,
           basic_format_context<Out, CharT>& fc) {
         using Traits = std::char_traits<CharT>;
-        return base::do_format(fc, format_str<CharT, Traits>{s});
+        return base::do_format(fc, format_str<CharT, Traits>{i});
     }
 };
+
+template <class CharT>
+struct formatter_impl<CharT*, CharT, true>
+    : public str_formatter<CharT*, CharT> {};
 template <class CharT>
 struct formatter_impl<const CharT*, CharT, true>
-    : public std_format_parser<CharT> {
-    using base = std_format_parser<CharT>;
-    template <typename Out>
-    typename basic_format_context<Out, CharT>::iterator format(
-          const CharT* s,
-          basic_format_context<Out, CharT>& fc) {
-        using Traits = std::char_traits<CharT>;
-        return base::do_format(fc, format_str<CharT, Traits>{s});
-    }
-};
+    : public str_formatter<const CharT*, CharT> {};
 template <class CharT, std::size_t N>
 struct formatter_impl<const CharT[N], CharT, true>
-    : public std_format_parser<CharT> {
-    using base = std_format_parser<CharT>;
-    template <typename Out>
-    typename basic_format_context<Out, CharT>::iterator format(
-          const CharT* s,
-          basic_format_context<Out, CharT>& fc) {
-        using Traits = std::char_traits<CharT>;
-        return base::do_format(fc, format_str<CharT, Traits>{s});
-    }
-};
+    : public str_formatter<const CharT[N], CharT> {};
 template <class CharT, class Traits, class Alloc>
 struct formatter_impl<std::basic_string<CharT, Traits, Alloc>, CharT, true>
-    : public std_format_parser<CharT> {
-    using base = std_format_parser<CharT>;
-    template <typename Out>
-    typename basic_format_context<Out, CharT>::iterator format(
-          std::basic_string<CharT, Traits> s,
-          basic_format_context<Out, CharT>& fc) {
-        return base::do_format(fc, format_str<CharT, Traits>{s});
-    }
-};
+    : public str_formatter<std::basic_string<CharT, Traits, Alloc>, CharT> {};
 template <class CharT, class Traits>
 struct formatter_impl<std::basic_string_view<CharT, Traits>, CharT, true>
-    : public std_format_parser<CharT> {
-    using base = std_format_parser<CharT>;
-    template <typename Out>
-    typename basic_format_context<Out, CharT>::iterator format(
-          std::basic_string_view<CharT, Traits> s,
-          basic_format_context<Out, CharT>& fc) {
-        return base::do_format(fc, format_str<CharT, Traits>{s});
-    }
-};
+    : public str_formatter<std::basic_string_view<CharT, Traits>, CharT> {};
 
 }  // namespace detail
 
@@ -1387,16 +1415,16 @@ constexpr result<CharT> parse_next(basic_string_view<CharT>& fmt) {
 
 namespace fmt_out {
 template <class CharT, class Out>
-Out text_out(basic_string_view<CharT> text, Out out) {
-    for (auto& c : text)
-        *++out = c;
+LRSTD_EXTRA_CONSTEXPR Out text_out(basic_string_view<CharT> text, Out out) {
+    for (auto c : text)
+        *out++ = c;
     return out;
 }
 
 template <class CharT, class Out>
-Out chars_out(CharT c, std::size_t count, Out out) {
+LRSTD_EXTRA_CONSTEXPR Out chars_out(CharT c, std::size_t count, Out out) {
     while (count--)
-        *++out = c;
+        *out++ = c;
     return out;
 }
 
@@ -1408,16 +1436,16 @@ struct throw_uninitialized_format_arg {
 };
 
 template <class Context, class CharT>
-void arg_out(Context& fc,
-             basic_format_parse_context<CharT>& pc,
-             const basic_format_arg<Context>& arg) {
+constexpr void arg_out(Context& fc,
+                       basic_format_parse_context<CharT>& pc,
+                       const basic_format_arg<Context>& arg) {
     visit_format_arg(
           overloaded{
                 throw_uninitialized_format_arg<std::monostate>{},
                 [&](const typename basic_format_arg<Context>::handle& handle) {
                     handle.format(pc, fc);
                 },
-                [&](const auto& val) {
+                [&](const auto val) {
                     using T = std::remove_cv_t<
                           std::remove_reference_t<decltype(val)>>;
                     typename Context::template formatter_type<T> f;
@@ -1434,9 +1462,9 @@ struct unreachable {
 };
 
 template <class CharT, class Out>
-Out vformat_to_impl(Out out,
-                    basic_string_view<CharT> fmt,
-                    format_args_t<Out, CharT>& args) {
+LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
+                                          basic_string_view<CharT> fmt,
+                                          format_args_t<Out, CharT>& args) {
     basic_format_context<Out, CharT> context(args, out);
     basic_format_parse_context<CharT> parse_context(fmt, context.args_size());
 
@@ -1452,20 +1480,22 @@ Out vformat_to_impl(Out out,
               overloaded{
                     unreachable<p::end>{}, unreachable<p::error>{},
                     [&](p::text) {
-                        fmt_out::text_out(
+                        context.advance_to(fmt_out::text_out(
                               basic_string_view<CharT>{
                                     old_begin,
                                     static_cast<std::size_t>(std::distance(
                                           old_begin, fmt.begin()))},
-                              out);
+                              context.out()));
                     },
                     [&](p::escaped_lbrace) {
                         const CharT c = static_cast<CharT>('{');
-                        fmt_out::text_out(basic_string_view<CharT>{&c, 1}, out);
+                        context.advance_to(fmt_out::text_out(
+                              basic_string_view<CharT>{&c, 1}, context.out()));
                     },
                     [&](p::escaped_rbrace) {
                         const CharT c = static_cast<CharT>('}');
-                        fmt_out::text_out(basic_string_view<CharT>{&c, 1}, out);
+                        context.advance_to(fmt_out::text_out(
+                              basic_string_view<CharT>{&c, 1}, context.out()));
                     },
                     [&](p::replacement_field<CharT> field) {
                         parse_context._begin = field.format_spec.begin();
@@ -1483,7 +1513,7 @@ Out vformat_to_impl(Out out,
 }  // namespace detail
 
 template <class CharT>
-std::basic_string<CharT> vformat_impl(
+LRSTD_EXTRA_CONSTEXPR std::basic_string<CharT> vformat_impl(
       basic_string_view<CharT> fmt,
       format_args_t<std::back_insert_iterator<std::basic_string<CharT>>, CharT>
             args) {
@@ -1495,25 +1525,31 @@ std::basic_string<CharT> vformat_impl(
 }  // namespace detail
 
 template <class Out>
-Out vformat_to(Out out, std::string_view fmt, format_args_t<Out, char> args) {
+LRSTD_EXTRA_CONSTEXPR Out vformat_to(Out out,
+                                     std::string_view fmt,
+                                     format_args_t<Out, char> args) {
     return detail::vformat_to_impl(out, fmt, args);
 }
 
 template <class Out>
-Out vformat_to(Out out,
-               std::wstring_view fmt,
-               format_args_t<Out, wchar_t> args) {
+LRSTD_EXTRA_CONSTEXPR Out vformat_to(Out out,
+                                     std::wstring_view fmt,
+                                     format_args_t<Out, wchar_t> args) {
     return detail::vformat_to_impl(out, fmt, args);
 }
 
 template <class Out, class... Args>
-Out format_to(Out out, std::string_view fmt, const Args&... args) {
+LRSTD_EXTRA_CONSTEXPR Out format_to(Out out,
+                                    std::string_view fmt,
+                                    const Args&... args) {
     using Context = basic_format_context<Out, std::string_view::value_type>;
     return vformat_to(out, fmt, {make_format_args<Context>(args...)});
 }
 
 template <class Out, class... Args>
-Out format_to(Out out, std::wstring_view fmt, const Args&... args) {
+LRSTD_EXTRA_CONSTEXPR Out format_to(Out out,
+                                    std::wstring_view fmt,
+                                    const Args&... args) {
     using Context = basic_format_context<Out, std::wstring_view::value_type>;
     return vformat_to(out, fmt, {make_format_args<Context>(args...)});
 }

@@ -14,7 +14,7 @@ if(NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/catch.hpp)
     endif()
 endif()
 
-set(source_files formatters.cpp hello_world.cpp make_format_args.cpp std_examples.cpp test.cpp)
+set(source_files constexpr.cpp formatters.cpp hello_world.cpp make_format_args.cpp std_examples.cpp test.cpp)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wextra -pedantic -Wno-missing-field-initializers")
 add_executable(format_test ${source_files})
 target_link_libraries(format_test PUBLIC format)
