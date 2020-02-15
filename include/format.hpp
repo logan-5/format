@@ -1127,6 +1127,9 @@ struct overlapping_str_writer : str_writer_common {
         return w;
     }
 };
+using overlapping_generic_writer = overloaded<overlapping_str_writer,
+                                              single_char_writer,
+                                              repeated_char_writer>;
 
 struct nonoverlapping_str_writer : str_writer_common {
     using str_writer_common::operator();
@@ -1287,8 +1290,14 @@ struct std_format_parser {
         }
         const alignment_t align =
               default_align ? f.default_alignment(type) : format_spec.align;
-        const auto formatted = f(type, format_spec.alternate);
-        const std::size_t value_width = formatted.size();
+        const auto formatted_char =
+              f.formatted_char(type, format_spec.alternate);
+        using str_type = decltype(f.formatted_str(type, format_spec.alternate));
+        const auto formatted_str =
+              formatted_char ? str_type()
+                             : f.formatted_str(type, format_spec.alternate);
+        const std::size_t value_width =
+              formatted_char ? 1 : formatted_str.size();
         const char sign = sign_char{}(format_spec.sign, f.is_negative());
         if (sign != '\0') {
             f.validate_sign(type);
@@ -1297,7 +1306,10 @@ struct std_format_parser {
               f.get_prefix(type, format_spec.alternate);
         out = write_prefix(out, width, value_width, prefix, align, zero_pad,
                            sign, format_spec.fill);
-        out = writer(formatted, out);
+        if (formatted_char)
+            out = writer(*formatted_char, out);
+        else
+            out = writer(formatted_str, out);
         const std::size_t value_and_prefix_width =
               value_width + prefix.size() + (sign != '\0');
         out = write_suffix(out, width, value_and_prefix_width, align, zero_pad,
@@ -1329,8 +1341,7 @@ struct format_int_storage_type<bool> {
     using type = char;
 };
 
-namespace detail {
-template <class Int, class Char>
+template <class Char, class Int>
 constexpr bool representable_as_char(Int i) noexcept {
     if constexpr (sizeof(Int) == sizeof(Char)) {
         if constexpr (std::is_signed_v<Int> == std::is_signed_v<Char>)
@@ -1341,21 +1352,20 @@ constexpr bool representable_as_char(Int i) noexcept {
             return i <= static_cast<Int>(std::numeric_limits<Char>::max());
         }
     } else if constexpr (std::is_signed_v<Int>) {
-        return i < static_cast<Int>(std::numeric_limits<Char>::min()) ||
-               static_cast<Int>(std::numeric_limits<Char>::max()) < i;
+        return static_cast<Int>(std::numeric_limits<Char>::min()) <= i &&
+               i <= static_cast<Int>(std::numeric_limits<Char>::max());
     } else {
-        return static_cast<Int>(std::numeric_limits<Char>::max()) < i;
+        return i <= static_cast<Int>(std::numeric_limits<Char>::max());
     }
 }
-}  // namespace detail
 
 template <class Int>
-struct format_int {
+struct format_int_common {
     typename format_int_storage_type<Int>::type i;
     std::array<char, sizeof(Int) * 8> buf;
 
-    constexpr std::string_view operator()(std_format_spec_types::type_t type,
-                                          bool) {
+    constexpr std::string_view formatted_str(std_format_spec_types::type_t type,
+                                             bool) {
         auto to_chars = [this](int base) -> std::string_view {
             const auto result =
                   std::to_chars(std::begin(buf), std::end(buf), i, base);
@@ -1383,12 +1393,6 @@ struct format_int {
                 return to_chars(10);
             case T::o:
                 return to_chars(8);
-            case T::c:
-                if (!detail::representable_as_char(i))
-                    throw format_error(
-                          "integer is not in representable range of char");
-                single_char_writer{}(static_cast<char>(i), buf.data());
-                return std::string_view(buf.data(), 1);
 
             case T::n:
                 throw "TODO";
@@ -1408,6 +1412,7 @@ struct format_int {
                 // clang-format on
                 throw format_error("invalid formatting type for integer");
 
+            case T::c:
             case T::defaulted:
                 break;
         }
@@ -1497,17 +1502,32 @@ struct format_int {
 };
 
 template <class Int, class CharT>
+struct format_int : public format_int_common<Int> {
+    constexpr std::optional<CharT> formatted_char(
+          std_format_spec_types::type_t type,
+          bool) const {
+        if (type == std_format_spec_types::type_t::c) {
+            if (!representable_as_char<CharT>(this->i))
+                throw format_error(
+                      "integer is not in representable range of char");
+            return static_cast<CharT>(this->i);
+        }
+        return std::nullopt;
+    }
+};
+
+template <class Int, class CharT>
 struct int_formatter : public std_format_parser<CharT> {
     using base = std_format_parser<CharT>;
     template <typename Out>
     constexpr typename basic_format_context<Out, CharT>::iterator format(
           Int i,
           basic_format_context<Out, CharT>& fc) {
-        fc.advance_to(
-              to_iter(base::do_format(maybe_to_raw_pointer(fc.out()),
-                                      base::get_width(fc), format_int<Int>{i},
-                                      nonoverlapping_str_writer{}),
-                      fc.out()));
+        fc.advance_to(to_iter(
+              base::do_format(maybe_to_raw_pointer(fc.out()),
+                              base::get_width(fc), format_int<Int, CharT>{{i}},
+                              nonoverlapping_generic_writer{}),
+              fc.out()));
         return fc.out();
     }
 };
@@ -1618,7 +1638,12 @@ struct formatter_impl<const void*, CharT, true>
 template <class CharT, class Traits>
 struct format_str {
     std::basic_string_view<CharT, Traits> s;
-    constexpr std::basic_string_view<CharT, Traits> operator()(
+
+    constexpr std::optional<CharT> formatted_char(std_format_spec_types::type_t,
+                                                  bool) const noexcept {
+        return std::nullopt;
+    }
+    constexpr std::basic_string_view<CharT, Traits> formatted_str(
           std_format_spec_types::type_t type,
           bool alternate) const {
         if (alternate)
@@ -1662,7 +1687,7 @@ struct str_formatter : public std_format_parser<CharT> {
         fc.advance_to(to_iter(
               base::do_format(maybe_to_raw_pointer(fc.out()),
                               base::get_width(fc), format_str<CharT, Traits>{i},
-                              overlapping_str_writer{}),
+                              overlapping_generic_writer{}),
               fc.out()));
         return fc.out();
     }
