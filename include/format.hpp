@@ -109,6 +109,18 @@ class format_error : public std::runtime_error {
     explicit format_error(const char* w) : std::runtime_error{w} {}
 };
 
+template <class It>
+struct iter_difference {
+    using type = typename std::iterator_traits<
+          std::remove_reference_t<std::remove_cv_t<It>>>::difference_type;
+};
+template <class T>
+struct iter_difference<std::back_insert_iterator<T>> {
+    using type = std::ptrdiff_t;
+};
+template <class It>
+using iter_difference_t = typename iter_difference<It>::type;
+
 template <typename CharT>
 using basic_string_view = std::basic_string_view<CharT>;
 
@@ -274,6 +286,13 @@ constexpr It to_iter(It ptr, It) noexcept {
 
 struct char_counter {
     std::size_t count = 0;
+};
+template <class It>
+struct write_n_wrapper {
+    iter_difference_t<It> n;
+    It it;
+    iter_difference_t<It> current = 0;
+    iter_difference_t<It> overflow = 0;
 };
 
 }  // namespace detail
@@ -509,14 +528,6 @@ struct overloaded : public F... {
 };
 template <typename... F>
 overloaded(F...)->overloaded<F...>;
-
-namespace fmt_out {
-template <class CharT, class Out>
-LRSTD_EXTRA_CONSTEXPR Out text_out(basic_string_view<CharT> text, Out out);
-
-template <class CharT, class Out>
-LRSTD_EXTRA_CONSTEXPR Out chars_out(CharT c, std::size_t count, Out out);
-}  // namespace fmt_out
 
 namespace parse_utils {
 
@@ -943,6 +954,18 @@ struct single_char_writer {
         ++counter.count;
         return counter;
     }
+    template <class CharT, class It>
+    constexpr write_n_wrapper<It> operator()(CharT c,
+                                             write_n_wrapper<It> w) const
+          noexcept(noexcept(this->operator()(c, w.it))) {
+        if (w.current < w.n) {
+            w.it = this->operator()(c, w.it);
+            ++w.current;
+            return w;
+        }
+        ++w.overflow;
+        return w;
+    }
 };
 struct repeated_char_writer {
     template <class CharT, class Out>
@@ -966,6 +989,19 @@ struct repeated_char_writer {
                                       char_counter counter) const noexcept {
         counter.count += count;
         return counter;
+    }
+    template <class CharT, class It>
+    constexpr write_n_wrapper<It> operator()(CharT c,
+                                             std::size_t count,
+                                             write_n_wrapper<It> w) const
+          noexcept(noexcept(this->operator()(c, count, w.it))) {
+        const auto to_write = std::min<std::size_t>(count, w.n - w.current);
+        w.it = this->operator()(c, to_write, w.it);
+        w.current += to_write;
+        if (count > to_write) {
+            w.overflow += count - to_write;
+        }
+        return w;
     }
 };
 
@@ -995,6 +1031,17 @@ struct overlapping_str_writer : str_writer_common {
         return out + str.size();
     }
 #endif
+    template <class CharT, class Traits, class It>
+    constexpr write_n_wrapper<It> operator()(
+          std::basic_string_view<CharT, Traits> str,
+          write_n_wrapper<It> w) const
+          noexcept(noexcept(this->operator()(str, w.it))) {
+        auto truncated_str = str.substr(0, w.n - w.current);
+        w.it = this->operator()(truncated_str, w.it);
+        w.current += truncated_str.size();
+        w.overflow += str.size() - truncated_str.size();
+        return w;
+    }
 };
 
 struct nonoverlapping_str_writer : str_writer_common {
@@ -1007,6 +1054,17 @@ struct nonoverlapping_str_writer : str_writer_common {
         return out + str.size();
     }
 #endif
+    template <class CharT, class Traits, class It>
+    constexpr write_n_wrapper<It> operator()(
+          std::basic_string_view<CharT, Traits> str,
+          write_n_wrapper<It> w) const
+          noexcept(noexcept(this->operator()(str, w.it))) {
+        auto truncated_str = str.substr(0, w.n - w.current);
+        w.it = this->operator()(truncated_str, w.it);
+        w.current += truncated_str.size();
+        w.overflow += str.size() - truncated_str.size();
+        return w;
+    }
 };
 using nonoverlapping_generic_writer = overloaded<nonoverlapping_str_writer,
                                                  single_char_writer,
@@ -1696,7 +1754,8 @@ std::wstring format(std::wstring_view fmt, const Args&... args) {
 }
 
 template <class... Args>
-std::size_t formatted_size(std::string_view fmt, const Args&... args) {
+LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(std::string_view fmt,
+                                                 const Args&... args) {
     using Context = basic_format_context<detail::char_counter,
                                          std::string_view::value_type>;
     return vformat_to(detail::char_counter{}, fmt,
@@ -1705,12 +1764,39 @@ std::size_t formatted_size(std::string_view fmt, const Args&... args) {
 }
 
 template <class... Args>
-std::size_t formatted_size(std::wstring_view fmt, const Args&... args) {
+LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(std::wstring_view fmt,
+                                                 const Args&... args) {
     using Context = basic_format_context<detail::char_counter,
                                          std::wstring_view::value_type>;
     return vformat_to(detail::char_counter{}, fmt,
                       {make_format_args<Context>(args...)})
           .count;
+}
+
+template <class Out>
+struct format_to_n_result {
+    Out out;
+    iter_difference_t<Out> size;
+};
+
+template <class Out, class... Args>
+LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
+      Out out,
+      iter_difference_t<Out> n,
+      std::string_view fmt,
+      const Args&... args) {
+    auto result = format_to(detail::write_n_wrapper<Out>{n, out}, fmt, args...);
+    return format_to_n_result<Out>{result.it, result.current + result.overflow};
+}
+
+template <class Out, class... Args>
+LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
+      Out out,
+      iter_difference_t<Out> n,
+      std::wstring_view fmt,
+      const Args&... args) {
+    auto result = format_to(detail::write_n_wrapper<Out>{n, out}, fmt, args...);
+    return format_to_n_result<Out>{result.it, result.current + result.overflow};
 }
 
 }  // namespace lrstd
