@@ -300,6 +300,22 @@ struct write_n_wrapper {
 namespace detail {
 template <class Context, class... Args>
 struct args_storage;
+
+enum class arg_tag : char {
+    empty,
+    b,
+    c,
+    i,
+    ui,
+    lli,
+    ulli,
+    d,
+    ld,
+    cptr,
+    sv,
+    vptr,
+    h,
+};
 }  // namespace detail
 
 template <class Context>
@@ -336,20 +352,68 @@ struct basic_format_arg {
    private:
     using char_type = typename Context::char_type;
 
-    std::variant<std::monostate,
-                 bool,
-                 char_type,
-                 int,
-                 unsigned int,
-                 long long int,
-                 unsigned long long int,
-                 double,
-                 long double,
-                 const char_type*,
-                 basic_string_view<char_type>,
-                 const void*,
-                 handle>
-          value;
+    union arg_storage {
+        std::monostate empty;
+        bool b;
+        char_type c;
+        int i;
+        unsigned int ui;
+        long long int lli;
+        unsigned long long int ulli;
+        double d;
+        long double ld;
+        const char_type* cptr;
+        basic_string_view<char_type> sv;
+        const void* vptr;
+        handle h;
+
+        constexpr arg_storage(std::monostate e) noexcept : empty{e} {}
+        constexpr arg_storage(bool b) noexcept : b{b} {}
+        constexpr arg_storage(char_type c) noexcept : c{c} {}
+        constexpr arg_storage(int i) noexcept : i{i} {}
+        constexpr arg_storage(unsigned int ui) noexcept : ui{ui} {}
+        constexpr arg_storage(long long int lli) noexcept : lli{lli} {}
+        constexpr arg_storage(unsigned long long int ulli) noexcept
+            : ulli{ulli} {}
+        constexpr arg_storage(double d) noexcept : d{d} {}
+        constexpr arg_storage(long double ld) noexcept : ld{ld} {}
+        constexpr arg_storage(const char_type* cptr) noexcept : cptr{cptr} {}
+        constexpr arg_storage(basic_string_view<char_type> sv) noexcept
+            : sv{sv} {}
+        constexpr arg_storage(const void* vptr) noexcept : vptr{vptr} {}
+        constexpr arg_storage(handle h) noexcept : h{h} {}
+    };
+    struct storage_and_tag {
+        using tag_t = detail::arg_tag;
+        arg_storage storage;
+        tag_t tag;
+        constexpr storage_and_tag(std::monostate e = {}) noexcept
+            : storage{e}, tag{tag_t::empty} {}
+        constexpr storage_and_tag(bool b) noexcept
+            : storage{b}, tag{tag_t::b} {}
+        constexpr storage_and_tag(char_type c) noexcept
+            : storage{c}, tag{tag_t::c} {}
+        constexpr storage_and_tag(int i) noexcept : storage{i}, tag{tag_t::i} {}
+        constexpr storage_and_tag(unsigned int ui) noexcept
+            : storage{ui}, tag{tag_t::ui} {}
+        constexpr storage_and_tag(long long int lli) noexcept
+            : storage{lli}, tag{tag_t::lli} {}
+        constexpr storage_and_tag(unsigned long long int ulli) noexcept
+            : storage{ulli}, tag{tag_t::ulli} {}
+        constexpr storage_and_tag(double d) noexcept
+            : storage{d}, tag{tag_t::d} {}
+        constexpr storage_and_tag(long double ld) noexcept
+            : storage{ld}, tag{tag_t::ld} {}
+        constexpr storage_and_tag(const char_type* cptr) noexcept
+            : storage{cptr}, tag{tag_t::cptr} {}
+        constexpr storage_and_tag(basic_string_view<char_type> sv) noexcept
+            : storage{sv}, tag{tag_t::sv} {}
+        constexpr storage_and_tag(const void* vptr) noexcept
+            : storage{vptr}, tag{tag_t::vptr} {}
+        constexpr storage_and_tag(handle h) noexcept
+            : storage{h}, tag{tag_t::h} {}
+    };
+    storage_and_tag value;
 
     template <class T,
               typename = std::enable_if_t<std::is_same_v<
@@ -388,7 +452,7 @@ struct basic_format_arg {
         : value{n} {}
     LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(long double n) noexcept
         : value{n} {}
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(const char_type* s)
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(const char_type* s) noexcept
         : value{s} {}
 
     template <class Traits>
@@ -397,14 +461,14 @@ struct basic_format_arg {
         : value{s} {}
     template <class Traits, class Alloc>
     LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(
-          const std::basic_string<char_type, Traits, Alloc>& s)
-        : value{basic_string_view<char_type>{s.data(), s.size()}} {}
+          const std::basic_string<char_type, Traits, Alloc>& s) noexcept
+        : value{s} {}
 
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(std::nullptr_t)
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(std::nullptr_t) noexcept
         : value{static_cast<const void*>(nullptr)} {}
 
     template <class T, class = std::enable_if_t<std::is_void_v<T>>>
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(T* p) : value{p} {}
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(T* p) noexcept : value{p} {}
 
     template <class Ctx, class... Args>
     friend LRSTD_EXTRA_CONSTEXPR detail::args_storage<Ctx, Args...>
@@ -418,31 +482,51 @@ struct basic_format_arg {
     LRSTD_EXTRA_CONSTEXPR basic_format_arg() noexcept = default;
 
     LRSTD_EXTRA_CONSTEXPR explicit operator bool() const noexcept {
-        return std::holds_alternative<std::monostate>(value);
+        return value.tag == detail::arg_tag::empty;
     }
-};
+};  // namespace lrstd
 
 template <class Visitor, class Context>
 LRSTD_EXTRA_CONSTEXPR auto visit_format_arg(Visitor&& visitor,
                                             basic_format_arg<Context> arg) {
-    using CharT = typename basic_format_arg<Context>::char_type;
-    // TODO
-    if (auto* val = std::get_if<typename basic_format_arg<Context>::handle>(
-              &arg.value))
-        return visitor(*val);
-    if (auto* val = std::get_if<CharT>(&arg.value))
-        return visitor(*val);
-    if (auto* val = std::get_if<std::monostate>(&arg.value))
-        return visitor(*val);
-    if (auto* val = std::get_if<int>(&arg.value))
-        return visitor(*val);
-    if (auto* val = std::get_if<bool>(&arg.value))
-        return visitor(*val);
-    if (auto* val = std::get_if<basic_string_view<CharT>>(&arg.value))
-        return visitor(*val);
-    if (auto* val = std::get_if<const CharT*>(&arg.value))
-        return visitor(*val);
-    throw;
+    auto visit = [&](auto& arg) {
+#if LRSTD_USE_EXTRA_CONSTEXPR
+        // invoke() isn't constexpr until C++20 :/
+        return std::forward<Visitor>(visitor)(arg);
+#else
+        return std::invoke(std::forward<Visitor>(visitor), arg);
+#endif
+    };
+    using T = detail::arg_tag;
+    switch (arg.value.tag) {
+        case T::b:
+            return visit(arg.value.storage.b);
+        case T::c:
+            return visit(arg.value.storage.c);
+        case T::i:
+            return visit(arg.value.storage.i);
+        case T::ui:
+            return visit(arg.value.storage.ui);
+        case T::lli:
+            return visit(arg.value.storage.lli);
+        case T::ulli:
+            return visit(arg.value.storage.ulli);
+        case T::d:
+            return visit(arg.value.storage.d);
+        case T::ld:
+            return visit(arg.value.storage.ld);
+        case T::cptr:
+            return visit(arg.value.storage.cptr);
+        case T::sv:
+            return visit(arg.value.storage.sv);
+        case T::vptr:
+            return visit(arg.value.storage.vptr);
+        case T::h:
+            return visit(arg.value.storage.h);
+        case T::empty:
+            return visit(arg.value.storage.empty);
+    }
+    LRSTD_UNREACHABLE();
 }
 
 namespace detail {
@@ -1245,6 +1329,26 @@ struct format_int_storage_type<bool> {
     using type = char;
 };
 
+namespace detail {
+template <class Int, class Char>
+constexpr bool representable_as_char(Int i) noexcept {
+    if constexpr (sizeof(Int) == sizeof(Char)) {
+        if constexpr (std::is_signed_v<Int> == std::is_signed_v<Char>)
+            return true;
+        else if constexpr (std::is_signed_v<Int> && !std::is_signed_v<Char>) {
+            return 0 <= i;
+        } else {
+            return i <= static_cast<Int>(std::numeric_limits<Char>::max());
+        }
+    } else if constexpr (std::is_signed_v<Int>) {
+        return i < static_cast<Int>(std::numeric_limits<Char>::min()) ||
+               static_cast<Int>(std::numeric_limits<Char>::max()) < i;
+    } else {
+        return static_cast<Int>(std::numeric_limits<Char>::max()) < i;
+    }
+}
+}  // namespace detail
+
 template <class Int>
 struct format_int {
     typename format_int_storage_type<Int>::type i;
@@ -1280,8 +1384,7 @@ struct format_int {
             case T::o:
                 return to_chars(8);
             case T::c:
-                if (i < std::numeric_limits<char>::min() ||
-                    std::numeric_limits<char>::max() < i)
+                if (!detail::representable_as_char(i))
                     throw format_error(
                           "integer is not in representable range of char");
                 single_char_writer{}(static_cast<char>(i), buf.data());
@@ -1410,7 +1513,34 @@ struct int_formatter : public std_format_parser<CharT> {
 };
 
 template <class CharT>
+struct formatter_impl<signed char, CharT, true>
+    : public int_formatter<signed char, CharT> {};
+template <class CharT>
+struct formatter_impl<unsigned char, CharT, true>
+    : public int_formatter<unsigned char, CharT> {};
+template <class CharT>
+struct formatter_impl<short int, CharT, true>
+    : public int_formatter<short int, CharT> {};
+template <class CharT>
+struct formatter_impl<unsigned short int, CharT, true>
+    : public int_formatter<unsigned short int, CharT> {};
+template <class CharT>
 struct formatter_impl<int, CharT, true> : public int_formatter<int, CharT> {};
+template <class CharT>
+struct formatter_impl<unsigned int, CharT, true>
+    : public int_formatter<unsigned int, CharT> {};
+template <class CharT>
+struct formatter_impl<long int, CharT, true>
+    : public int_formatter<long int, CharT> {};
+template <class CharT>
+struct formatter_impl<unsigned long int, CharT, true>
+    : public int_formatter<unsigned long int, CharT> {};
+template <class CharT>
+struct formatter_impl<long long int, CharT, true>
+    : public int_formatter<long long int, CharT> {};
+template <class CharT>
+struct formatter_impl<unsigned long long int, CharT, true>
+    : public int_formatter<unsigned long long int, CharT> {};
 
 template <class CharT>
 struct formatter_impl<bool, CharT, true> : public int_formatter<bool, CharT> {};
@@ -1421,6 +1551,66 @@ struct formatter_impl<CharT, CharT, true>
 template <>
 struct formatter_impl<char, wchar_t, true>
     : public int_formatter<char, wchar_t> {};
+
+//////////////////////////////
+// float formatters
+
+template <class Float, class CharT>
+struct float_formatter : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    template <typename Out>
+    constexpr typename basic_format_context<Out, CharT>::iterator format(
+          Float,
+          basic_format_context<Out, CharT>&) {
+        throw "not yet implemented";
+        // fc.advance_to(
+        //       to_iter(base::do_format(maybe_to_raw_pointer(fc.out()),
+        //                               base::get_width(fc),
+        //                               format_int<Int>{i},
+        //                               nonoverlapping_str_writer{}),
+        //               fc.out()));
+        // return fc.out();
+    }
+};
+template <class CharT>
+struct formatter_impl<float, CharT, true>
+    : public float_formatter<float, CharT> {};
+template <class CharT>
+struct formatter_impl<double, CharT, true>
+    : public float_formatter<double, CharT> {};
+template <class CharT>
+struct formatter_impl<long double, CharT, true>
+    : public float_formatter<long double, CharT> {};
+
+//////////////////////////////
+// pointer formatters
+
+template <class Pointer, class CharT>
+struct pointer_formatter : public std_format_parser<CharT> {
+    using base = std_format_parser<CharT>;
+    template <typename Out>
+    constexpr typename basic_format_context<Out, CharT>::iterator format(
+          Pointer,
+          basic_format_context<Out, CharT>&) {
+        throw "not yet implemented";
+        // fc.advance_to(
+        //       to_iter(base::do_format(maybe_to_raw_pointer(fc.out()),
+        //                               base::get_width(fc),
+        //                               format_int<Int>{i},
+        //                               nonoverlapping_str_writer{}),
+        //               fc.out()));
+        // return fc.out();
+    }
+};
+template <class CharT>
+struct formatter_impl<std::nullptr_t, CharT, true>
+    : public pointer_formatter<std::nullptr_t, CharT> {};
+template <class CharT>
+struct formatter_impl<void*, CharT, true>
+    : public pointer_formatter<void*, CharT> {};
+template <class CharT>
+struct formatter_impl<const void*, CharT, true>
+    : public pointer_formatter<const void*, CharT> {};
 
 //////////////////////////////
 // string formatters
