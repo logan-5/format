@@ -1,5 +1,8 @@
 #include "format.hpp"
 
+#include <string>
+#include <string_view>
+
 #include <catch.hpp>
 
 namespace {
@@ -8,7 +11,10 @@ const char* color_names[] = {"red", "green", "blue"};
 }  // namespace
 template <>
 struct lrstd::formatter<color> : lrstd::formatter<const char*> {
-    auto format(color c, format_context& ctx) {
+    // TODO: the implementation of formatted_size uses a special iterator, which
+    // requires this to be templated on the output iterator. is that conforming?
+    template <class Out>
+    auto format(color c, basic_format_context<Out, char>& ctx) {
         return formatter<const char*>::format(color_names[c], ctx);
     }
 };
@@ -37,7 +43,8 @@ struct lrstd::formatter<S> {
     }
 
     // Formats an S with width given by the argument width_­arg_­id.
-    auto format(S s, format_context& ctx) {
+    template <class Out>
+    auto format(S s, basic_format_context<Out, char>& ctx) {
         int width = visit_format_arg(
               [](auto value) -> int {
                   if constexpr (!std::is_integral_v<decltype(value)>)
@@ -52,42 +59,36 @@ struct lrstd::formatter<S> {
     }
 };
 
-TEST_CASE("std_examples", "") {
-    using lrstd::format;
-
-    REQUIRE(format("{0}-{{", 8) == "8-{");
-
-    REQUIRE(format("{} to {}", "a", "b") == "a to b");
-    REQUIRE(format("{1} to {0}", "a", "b") == "b to a");
+TEST_CASE("formatted_size", "") {
+    using namespace std::literals;
+    using lrstd::formatted_size;
     {
-        bool threw = false;
-        try {
-            format("{0} to {}", "a", "b");
-        } catch (const lrstd::format_error&) {
-            threw = true;
-        }
-        REQUIRE(threw);
+        REQUIRE(formatted_size("{}", "hey") == 3);
+        REQUIRE(formatted_size("{0: ^6}", "hey") == 6);
+        REQUIRE(formatted_size("{:_>6}", "hey") == 6);
     }
     {
-        bool threw = false;
-        try {
-            format("{} to {1}", "a", "b");
-        } catch (const lrstd::format_error&) {
-            threw = true;
-        }
-        REQUIRE(threw);
+        REQUIRE(formatted_size("{:s}", true) == 4);
+        REQUIRE(formatted_size("{:s}", false) == 5);
+        REQUIRE(formatted_size("{0: ^6s}", true) == 6);
+        REQUIRE(formatted_size("{:_>6s}", false) == 6);
     }
+
+    REQUIRE(formatted_size("{0}-{{", 8) == 3);
+
+    REQUIRE(formatted_size("{} to {}", "a", "b") == 6);
+    REQUIRE(formatted_size("{1} to {0}", "a", "b") == 6);
 
     {
         char c = 120;
-        REQUIRE(format("{:6}", 42) == "    42");
-        REQUIRE(format("{:6}", 'x') == "x     ");
-        REQUIRE(format("{:*<6}", 'x') == "x*****");
-        REQUIRE(format("{:*>6}", 'x') == "*****x");
-        REQUIRE(format("{:*^6}", 'x') == "**x***");
-        REQUIRE(format("{:*^{}}", 'x', 6) == "**x***");
-        REQUIRE(format("{:6d}", c) == "   120");
-        REQUIRE(format("{:6}", true) == "true  ");
+        REQUIRE(formatted_size("{:6}", 42) == 6);
+        REQUIRE(formatted_size("{:6}", 'x') == 6);
+        REQUIRE(formatted_size("{:*<6}", 'x') == 6);
+        REQUIRE(formatted_size("{:*>6}", 'x') == 6);
+        REQUIRE(formatted_size("{:*^6}", 'x') == 6);
+        REQUIRE(formatted_size("{:*^{}}", 'x', 6) == 6);
+        REQUIRE(formatted_size("{:6d}", c) == 6);
+        REQUIRE(formatted_size("{:6}", true) == 6);
     }
 
     {
@@ -106,21 +107,21 @@ TEST_CASE("std_examples", "") {
 
     {
         char c = 120;
-        REQUIRE(format("{:+06d}", c) == "+00120");
-        REQUIRE(format("{:#06x}", 0xa) == "0x000a");
-        REQUIRE(format("{:<06}", -42) == "-42   ");
+        REQUIRE(formatted_size("{:+06d}", c) == 6);
+        REQUIRE(formatted_size("{:#06x}", 0xa) == 6);
+        REQUIRE(formatted_size("{:<06}", -42) == 6);
     }
 
     {
-        REQUIRE(format("{}", 42) == "42");
-        REQUIRE(format("{0:b} {0:d} {0:o} {0:x}", 42) == "101010 42 52 2a");
-        REQUIRE(format("{0:#x} {0:#X}", 42) == "0x2a 0X2A");
+        REQUIRE(formatted_size("{}", 42) == 2);
+        REQUIRE(formatted_size("{0:b} {0:d} {0:o} {0:x}", 42) == 15);
+        REQUIRE(formatted_size("{0:#x} {0:#X}", 42) == 9);
 
         // clang-format off
         // TODO
         // REQUIRE(format("{:L}", 1234) == "1,234");  // (depending on the locale)
         // clang-format on
     }
-    { REQUIRE(format("{}", red) == "red"); }
-    { REQUIRE(format("{0:{1}}", S{42}, 10) == "xxxxxxxx42"); }
+    { REQUIRE(formatted_size("{}", red) == 3); }
+    { REQUIRE(formatted_size("{0:{1}}", S{42}, 10) == 10); }
 }

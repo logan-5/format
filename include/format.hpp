@@ -207,12 +207,14 @@ template <typename T>
 inline constexpr bool is_unsigned_integer_v =
       std::is_integral_v<T> && !std::is_signed_v<T>;
 
-template <class It,
-          bool = std::is_void_v<typename std::iterator_traits<It>::value_type>>
+template <class It, class = void>
 struct hack_is_contiguous_iterator : std::false_type {};
 
 template <class It>
-struct hack_is_contiguous_iterator<It, false>
+struct hack_is_contiguous_iterator<
+      It,
+      std::enable_if_t<
+            !std::is_void_v<typename std::iterator_traits<It>::value_type>>>
     : std::bool_constant<std::disjunction_v<
             std::is_pointer<It>,
             std::is_same<It,
@@ -269,6 +271,10 @@ template <class It, class = std::enable_if_t<!std::is_pointer_v<It>>>
 constexpr It to_iter(It ptr, It) noexcept {
     return ptr;
 }
+
+struct char_counter {
+    std::size_t count = 0;
+};
 
 }  // namespace detail
 
@@ -931,6 +937,12 @@ struct single_char_writer {
         Traits::assign(*out++, c);
         return out;
     };
+    template <class CharT>
+    constexpr char_counter operator()(CharT, char_counter counter) const
+          noexcept {
+        ++counter.count;
+        return counter;
+    }
 };
 struct repeated_char_writer {
     template <class CharT, class Out>
@@ -948,6 +960,13 @@ struct repeated_char_writer {
         return out + count;
     }
 #endif
+    template <class CharT>
+    constexpr char_counter operator()(CharT,
+                                      std::size_t count,
+                                      char_counter counter) const noexcept {
+        counter.count += count;
+        return counter;
+    }
 };
 
 struct str_writer_common {
@@ -958,6 +977,12 @@ struct str_writer_common {
         for (CharT c : str)
             *out++ = c;
         return out;
+    }
+    template <class CharT, class Traits>
+    constexpr char_counter operator()(std::basic_string_view<CharT, Traits> str,
+                                      char_counter counter) const noexcept {
+        counter.count += str.size();
+        return counter;
     }
 };
 struct overlapping_str_writer : str_writer_common {
@@ -1668,6 +1693,24 @@ std::string format(std::string_view fmt, const Args&... args) {
 template <class... Args>
 std::wstring format(std::wstring_view fmt, const Args&... args) {
     return vformat(fmt, {make_wformat_args(args...)});
+}
+
+template <class... Args>
+std::size_t formatted_size(std::string_view fmt, const Args&... args) {
+    using Context = basic_format_context<detail::char_counter,
+                                         std::string_view::value_type>;
+    return vformat_to(detail::char_counter{}, fmt,
+                      {make_format_args<Context>(args...)})
+          .count;
+}
+
+template <class... Args>
+std::size_t formatted_size(std::wstring_view fmt, const Args&... args) {
+    using Context = basic_format_context<detail::char_counter,
+                                         std::wstring_view::value_type>;
+    return vformat_to(detail::char_counter{}, fmt,
+                      {make_format_args<Context>(args...)})
+          .count;
 }
 
 }  // namespace lrstd
