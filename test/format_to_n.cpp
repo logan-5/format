@@ -31,17 +31,17 @@ TEST_CASE("format_to_n", "") {
         {
             auto result =
                   format_to_n(chars.begin(), 11, "unavoidable paradigm");
-            REQUIRE(result.size == 20);
-            REQUIRE(result.out == std::next(chars.begin(), 11));
-            REQUIRE(sv(chars) == "unavoidable");
+            CHECK(result.size == 20);
+            CHECK(result.out == std::next(chars.begin(), 11));
+            CHECK(sv(chars) == "unavoidable");
         }
         {
             auto result = format_to_n(chars.begin(), 16,
                                       "the system is {1} free from {0}",
                                       "error", "now");
-            REQUIRE(result.size == 33);
-            REQUIRE(result.out == std::next(chars.begin(), 16));
-            REQUIRE(sv(chars) == "the system is no");
+            CHECK(result.size == 33);
+            CHECK(result.out == std::next(chars.begin(), 16));
+            CHECK(sv(chars) == "the system is no");
         }
     }
     {
@@ -49,37 +49,37 @@ TEST_CASE("format_to_n", "") {
         {
             auto result = format_to_n(std::back_inserter(chars), 10000000,
                                       "the {}", "system");
-            REQUIRE(result.size == 10);
-            REQUIRE(sv(chars) == "the system");
+            CHECK(result.size == 10);
+            CHECK(sv(chars) == "the system");
         }
         {
             auto result = format_to_n(std::back_inserter(chars), 0,
                                       " revokes our {} form", "viral");
-            REQUIRE(result.size == 23);
-            REQUIRE(sv(chars) == "the system");
+            CHECK(result.size == 23);
+            CHECK(sv(chars) == "the system");
         }
     }
     {
         std::string chars;
         auto result = format_to_n(std::back_inserter(chars), 20, "{:*^20}", "");
-        REQUIRE(chars == "********************");
-        REQUIRE(result.size == 20);
+        CHECK(chars == "********************");
+        CHECK(result.size == 20);
         chars.clear();
         result = format_to_n(std::back_inserter(chars), 10, "{:*>20}", "");
-        REQUIRE(chars == "**********");
-        REQUIRE(result.size == 20);
+        CHECK(chars == "**********");
+        CHECK(result.size == 20);
     }
     {
         std::string chars;
         auto result = format_to_n(std::back_inserter(chars), 200,
                                   "{0:_>5}{0:-^3}{0:_<5}", 'a');
-        REQUIRE(chars == "____a-a-a____");
-        REQUIRE(result.size == 13);
+        CHECK(chars == "____a-a-a____");
+        CHECK(result.size == 13);
         chars.clear();
         result = format_to_n(std::back_inserter(chars), 8,
                              "{0:_>5}{0:-^3}{0:_<5}", 'a');
-        REQUIRE(chars == "____a-a-");
-        REQUIRE(result.size == 13);
+        CHECK(chars == "____a-a-");
+        CHECK(result.size == 13);
     }
 }
 
@@ -94,17 +94,17 @@ TEST_CASE("format_to_n_wide", "") {
         {
             auto result =
                   format_to_n(chars.begin(), 11, L"unavoidable paradigm");
-            REQUIRE(result.size == 20);
-            REQUIRE(result.out == std::next(chars.begin(), 11));
-            REQUIRE(sv(chars) == L"unavoidable");
+            CHECK(result.size == 20);
+            CHECK(result.out == std::next(chars.begin(), 11));
+            CHECK(sv(chars) == L"unavoidable");
         }
         {
             auto result = format_to_n(chars.begin(), 16,
                                       L"the system is {1} free from {0}",
                                       L"error", L"now");
-            REQUIRE(result.size == 33);
-            REQUIRE(result.out == std::next(chars.begin(), 16));
-            REQUIRE(sv(chars) == L"the system is no");
+            CHECK(result.size == 33);
+            CHECK(result.out == std::next(chars.begin(), 16));
+            CHECK(sv(chars) == L"the system is no");
         }
     }
     {
@@ -112,37 +112,37 @@ TEST_CASE("format_to_n_wide", "") {
         {
             auto result = format_to_n(std::back_inserter(chars), 10000000,
                                       L"the {}", L"system");
-            REQUIRE(result.size == 10);
-            REQUIRE(sv(chars) == L"the system");
+            CHECK(result.size == 10);
+            CHECK(sv(chars) == L"the system");
         }
         {
             auto result = format_to_n(std::back_inserter(chars), 0,
                                       L" revokes our {} form", L"viral");
-            REQUIRE(result.size == 23);
-            REQUIRE(sv(chars) == L"the system");
+            CHECK(result.size == 23);
+            CHECK(sv(chars) == L"the system");
         }
     }
     {
         std::wstring chars;
         auto result =
               format_to_n(std::back_inserter(chars), 20, L"{:*^20}", L"");
-        REQUIRE(chars == L"********************");
-        REQUIRE(result.size == 20);
+        CHECK(chars == L"********************");
+        CHECK(result.size == 20);
         chars.clear();
         result = format_to_n(std::back_inserter(chars), 10, L"{:*>20}", L"");
-        REQUIRE(chars == L"**********");
-        REQUIRE(result.size == 20);
+        CHECK(chars == L"**********");
+        CHECK(result.size == 20);
     }
     {
         std::wstring chars;
         auto result = format_to_n(std::back_inserter(chars), 200,
                                   L"{0:_>5}{0:-^3}{0:_<5}", L'a');
-        REQUIRE(chars == L"____a-a-a____");
-        REQUIRE(result.size == 13);
+        CHECK(chars == L"____a-a-a____");
+        CHECK(result.size == 13);
         chars.clear();
         result = format_to_n(std::back_inserter(chars), 8,
                              L"{0:_>5}{0:-^3}{0:_<5}", L'a');
-        REQUIRE(chars == L"____a-a-");
-        REQUIRE(result.size == 13);
+        CHECK(chars == L"____a-a-");
+        CHECK(result.size == 13);
     }
 }

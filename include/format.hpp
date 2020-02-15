@@ -482,7 +482,7 @@ struct basic_format_arg {
     LRSTD_EXTRA_CONSTEXPR basic_format_arg() noexcept = default;
 
     LRSTD_EXTRA_CONSTEXPR explicit operator bool() const noexcept {
-        return value.tag == detail::arg_tag::empty;
+        return value.tag != detail::arg_tag::empty;
     }
 };  // namespace lrstd
 

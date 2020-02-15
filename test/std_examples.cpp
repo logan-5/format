@@ -55,10 +55,10 @@ struct lrstd::formatter<S> {
 TEST_CASE("std_examples", "") {
     using lrstd::format;
 
-    REQUIRE(format("{0}-{{", 8) == "8-{");
+    CHECK(format("{0}-{{", 8) == "8-{");
 
-    REQUIRE(format("{} to {}", "a", "b") == "a to b");
-    REQUIRE(format("{1} to {0}", "a", "b") == "b to a");
+    CHECK(format("{} to {}", "a", "b") == "a to b");
+    CHECK(format("{1} to {0}", "a", "b") == "b to a");
     {
         bool threw = false;
         try {
@@ -66,7 +66,7 @@ TEST_CASE("std_examples", "") {
         } catch (const lrstd::format_error&) {
             threw = true;
         }
-        REQUIRE(threw);
+        CHECK(threw);
     }
     {
         bool threw = false;
@@ -75,19 +75,19 @@ TEST_CASE("std_examples", "") {
         } catch (const lrstd::format_error&) {
             threw = true;
         }
-        REQUIRE(threw);
+        CHECK(threw);
     }
 
     {
         char c = 120;
-        REQUIRE(format("{:6}", 42) == "    42");
-        REQUIRE(format("{:6}", 'x') == "x     ");
-        REQUIRE(format("{:*<6}", 'x') == "x*****");
-        REQUIRE(format("{:*>6}", 'x') == "*****x");
-        REQUIRE(format("{:*^6}", 'x') == "**x***");
-        REQUIRE(format("{:*^{}}", 'x', 6) == "**x***");
-        REQUIRE(format("{:6d}", c) == "   120");
-        REQUIRE(format("{:6}", true) == "true  ");
+        CHECK(format("{:6}", 42) == "    42");
+        CHECK(format("{:6}", 'x') == "x     ");
+        CHECK(format("{:*<6}", 'x') == "x*****");
+        CHECK(format("{:*>6}", 'x') == "*****x");
+        CHECK(format("{:*^6}", 'x') == "**x***");
+        CHECK(format("{:*^{}}", 'x', 6) == "**x***");
+        CHECK(format("{:6d}", c) == "   120");
+        CHECK(format("{:6}", true) == "true  ");
     }
 
     {
@@ -96,31 +96,31 @@ TEST_CASE("std_examples", "") {
         // TODO
         // double inf = std::numeric_limits<double>::infinity();
         // double nan = std::numeric_limits<double>::quiet_NaN();
-        // REQUIRE(format("{0:},{0:+},{0:-},{0: }", 1) == "1,+1,1, 1");
-        // REQUIRE(format("{0:},{0:+},{0:-},{0: }", -1) == "-1,-1,-1,-1");
-        // REQUIRE(format("{0:},{0:+},{0:-},{0: }", inf) == "inf,+inf,inf, inf");
-        // REQUIRE(format("{0:},{0:+},{0:-},{0: }", nan) == "nan,+nan,nan, nan");
+        // CHECK(format("{0:},{0:+},{0:-},{0: }", 1) == "1,+1,1, 1");
+        // CHECK(format("{0:},{0:+},{0:-},{0: }", -1) == "-1,-1,-1,-1");
+        // CHECK(format("{0:},{0:+},{0:-},{0: }", inf) == "inf,+inf,inf, inf");
+        // CHECK(format("{0:},{0:+},{0:-},{0: }", nan) == "nan,+nan,nan, nan");
 
           // clang-format on
     }
 
     {
         char c = 120;
-        REQUIRE(format("{:+06d}", c) == "+00120");
-        REQUIRE(format("{:#06x}", 0xa) == "0x000a");
-        REQUIRE(format("{:<06}", -42) == "-42   ");
+        CHECK(format("{:+06d}", c) == "+00120");
+        CHECK(format("{:#06x}", 0xa) == "0x000a");
+        CHECK(format("{:<06}", -42) == "-42   ");
     }
 
     {
-        REQUIRE(format("{}", 42) == "42");
-        REQUIRE(format("{0:b} {0:d} {0:o} {0:x}", 42) == "101010 42 52 2a");
-        REQUIRE(format("{0:#x} {0:#X}", 42) == "0x2a 0X2A");
+        CHECK(format("{}", 42) == "42");
+        CHECK(format("{0:b} {0:d} {0:o} {0:x}", 42) == "101010 42 52 2a");
+        CHECK(format("{0:#x} {0:#X}", 42) == "0x2a 0X2A");
 
         // clang-format off
         // TODO
-        // REQUIRE(format("{:L}", 1234) == "1,234");  // (depending on the locale)
+        // CHECK(format("{:L}", 1234) == "1,234");  // (depending on the locale)
         // clang-format on
     }
-    { REQUIRE(format("{}", red) == "red"); }
-    { REQUIRE(format("{0:{1}}", S{42}, 10) == "xxxxxxxx42"); }
+    { CHECK(format("{}", red) == "red"); }
+    { CHECK(format("{0:{1}}", S{42}, 10) == "xxxxxxxx42"); }
 }
