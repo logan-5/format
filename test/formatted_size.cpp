@@ -125,3 +125,68 @@ TEST_CASE("formatted_size", "") {
     { REQUIRE(formatted_size("{}", red) == 3); }
     { REQUIRE(formatted_size("{0:{1}}", S{42}, 10) == 10); }
 }
+
+TEST_CASE("formatted_size_wide", "") {
+    using namespace std::literals;
+    using lrstd::formatted_size;
+    {
+        REQUIRE(formatted_size(L"{}", L"hey") == 3);
+        REQUIRE(formatted_size(L"{0: ^6}", L"hey") == 6);
+        REQUIRE(formatted_size(L"{:_>6}", L"hey") == 6);
+    }
+    {
+        REQUIRE(formatted_size(L"{:s}", true) == 4);
+        REQUIRE(formatted_size(L"{:s}", false) == 5);
+        REQUIRE(formatted_size(L"{0: ^6s}", true) == 6);
+        REQUIRE(formatted_size(L"{:_>6s}", false) == 6);
+    }
+
+    REQUIRE(formatted_size(L"{0}-{{", 8) == 3);
+
+    REQUIRE(formatted_size(L"{} to {}", L"a", L"b") == 6);
+    REQUIRE(formatted_size(L"{1} to {0}", L"a", L"b") == 6);
+
+    {
+        char c = 120;
+        REQUIRE(formatted_size(L"{:6}", 42) == 6);
+        REQUIRE(formatted_size(L"{:6}", 'x') == 6);
+        REQUIRE(formatted_size(L"{:*<6}", 'x') == 6);
+        REQUIRE(formatted_size(L"{:*>6}", 'x') == 6);
+        REQUIRE(formatted_size(L"{:*^6}", 'x') == 6);
+        REQUIRE(formatted_size(L"{:*^{}}", 'x', 6) == 6);
+        REQUIRE(formatted_size(L"{:6d}", c) == 6);
+        REQUIRE(formatted_size(L"{:6}", true) == 6);
+    }
+
+    {
+          // clang-format off
+
+        // TODO
+        // double inf = std::numeric_limits<double>::infinity();
+        // double nan = std::numeric_limits<double>::quiet_NaN();
+        // REQUIRE(format("{0:},{0:+},{0:-},{0: }", 1) == "1,+1,1, 1");
+        // REQUIRE(format("{0:},{0:+},{0:-},{0: }", -1) == "-1,-1,-1,-1");
+        // REQUIRE(format("{0:},{0:+},{0:-},{0: }", inf) == "inf,+inf,inf, inf");
+        // REQUIRE(format("{0:},{0:+},{0:-},{0: }", nan) == "nan,+nan,nan, nan");
+
+          // clang-format on
+    }
+
+    {
+        char c = 120;
+        REQUIRE(formatted_size(L"{:+06d}", c) == 6);
+        REQUIRE(formatted_size(L"{:#06x}", 0xa) == 6);
+        REQUIRE(formatted_size(L"{:<06}", -42) == 6);
+    }
+
+    {
+        REQUIRE(formatted_size(L"{}", 42) == 2);
+        REQUIRE(formatted_size(L"{0:b} {0:d} {0:o} {0:x}", 42) == 15);
+        REQUIRE(formatted_size(L"{0:#x} {0:#X}", 42) == 9);
+
+        // clang-format off
+        // TODO
+        // REQUIRE(format("{:L}", 1234) == "1,234");  // (depending on the locale)
+        // clang-format on
+    }
+}
