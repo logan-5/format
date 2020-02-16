@@ -15,6 +15,7 @@ if(NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/catch.hpp)
 endif()
 
 set(source_files 
+    format_error.cpp
     format_to_n.cpp 
     formatters.cpp 
     formatted_size.cpp 
