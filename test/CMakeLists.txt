@@ -20,6 +20,7 @@ set(source_files
     formatters.cpp 
     formatted_size.cpp 
     hello_world.cpp 
+    invalid.cpp
     make_format_args.cpp 
     output.cpp 
     representable_as_char.cpp 

@@ -1,12 +1,19 @@
+#include "converter.hpp"
 #include "format.hpp"
 
 #include <catch.hpp>
 
-TEST_CASE("hello_world", "") {
+TEMPLATE_TEST_CASE("hello_world", "", char, wchar_t) {
     using lrstd::format;
-    CHECK(format("{}ello, {}orld\n", 'h', 'w') == "hello, world\n");
-    CHECK(format("{0}ello, {1}orld\n", 'h', 'w') == "hello, world\n");
-    CHECK(format("{1}ello, {0}orld\n", 'h', 'w') == "wello, horld\n");
-    CHECK(format("{1:}ello, {0:}orld\n", 'h', 'w') == "wello, horld\n");
-    CHECK(format("{:}ello, {:}orld\n", 'h', 'w') == "hello, world\n");
+    str_fn<TestType> str;
+    CHECK(format(str("{}ello, {}orld\n"), str('h'), str('w')) ==
+          str("hello, world\n"));
+    CHECK(format(str("{0}ello, {1}orld\n"), str('h'), str('w')) ==
+          str("hello, world\n"));
+    CHECK(format(str("{1}ello, {0}orld\n"), str('h'), str('w')) ==
+          str("wello, horld\n"));
+    CHECK(format(str("{1:}ello, {0:}orld\n"), str('h'), str('w')) ==
+          str("wello, horld\n"));
+    CHECK(format(str("{:}ello, {:}orld\n"), str('h'), str('w')) ==
+          str("hello, world\n"));
 }

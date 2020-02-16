@@ -1,62 +1,11 @@
 #include "format.hpp"
+#include "user_defined.hpp"
 
 #include <catch.hpp>
 
 #include <string>
 #include <string_view>
 #include <typeinfo>
-
-namespace {
-enum color { red, green, blue };
-const char* color_names[] = {"red", "green", "blue"};
-}  // namespace
-template <>
-struct lrstd::formatter<color> : lrstd::formatter<const char*> {
-    template <class Out>
-    auto format(color c, basic_format_context<Out, char>& ctx) {
-        return formatter<const char*>::format(color_names[c], ctx);
-    }
-};
-namespace {
-struct S {
-    int value;
-};
-}  // namespace
-template <>
-struct lrstd::formatter<S> {
-    size_t width_arg_id = 0;
-
-    // Parses a width argument id in the format { digit }.
-    constexpr auto parse(format_parse_context& ctx) {
-        auto iter = ctx.begin();
-        auto get_char = [&]() { return iter != ctx.end() ? *iter : 0; };
-        if (get_char() != '{')
-            return iter;
-        ++iter;
-        char c = get_char();
-        if (!isdigit(c) || (++iter, get_char()) != '}')
-            throw format_error("invalid format");
-        width_arg_id = c - '0';
-        ctx.check_arg_id(width_arg_id);
-        return ++iter;
-    }
-
-    // Formats an S with width given by the argument width_­arg_­id.
-    template <class Out>
-    auto format(S s, basic_format_context<Out, char>& ctx) {
-        int width = visit_format_arg(
-              [](auto value) -> int {
-                  if constexpr (!std::is_integral_v<decltype(value)>)
-                      throw format_error("width is not integral");
-                  else if (value < 0 || value > std::numeric_limits<int>::max())
-                      throw format_error("invalid width");
-                  else
-                      return value;
-              },
-              ctx.arg(width_arg_id));
-        return format_to(ctx.out(), "{0:x>{1}}", s.value, width);
-    }
-};
 
 using lrstd::basic_format_arg;
 using lrstd::basic_format_args;
@@ -226,8 +175,9 @@ TEST_CASE("visit_format_args", "") {
     }
 }
 
-TEST_CASE("make_format_args_large_arity", "") {
-    using args = basic_format_args<format_context>;
+TEMPLATE_TEST_CASE("make_format_args_large_arity", "", char, wchar_t) {
+    using context = lrstd::basic_format_context<TestType*, TestType>;
+    using args = basic_format_args<context>;
 
     CHECK(visit_format_arg(
                 [](auto arg) {
@@ -236,7 +186,7 @@ TEST_CASE("make_format_args_large_arity", "") {
                     else
                         return 999;
                 },
-                args(make_format_args(
+                args(make_format_args<context>(
                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
