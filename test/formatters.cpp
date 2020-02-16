@@ -1,3 +1,4 @@
+#include "converter.hpp"
 #include "format.hpp"
 
 #include <string>
@@ -5,73 +6,75 @@
 
 #include <catch.hpp>
 
-TEST_CASE("formatters", "[formatters]") {
+TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
     using namespace std::literals;
     using lrstd::format;
+
+    str_fn<TestType> str;
+
     {
-        CHECK(format("{}", "hey") == "hey");
-        CHECK(format("{0: ^6}", "hey") == " hey  ");
-        CHECK(format("{:_>6}", "hey") == "___hey");
+        CHECK(format(str("{}"), str("hey")) == str("hey"));
+        CHECK(format(str("{0: ^6}"), str("hey")) == str(" hey  "));
+        CHECK(format(str("{:_>6}"), str("hey")) == str("___hey"));
     }
     {
-        CHECK(format("{}", "hey"s) == "hey");
-        CHECK(format("{0: ^6}", "hey"s) == " hey  ");
-        CHECK(format("{:_>6}", "hey"s) == "___hey");
+        CHECK(format(str("{}"), str("hey"s)) == str("hey"));
+        CHECK(format(str("{0: ^6}"), str("hey"s)) == str(" hey  "));
+        CHECK(format(str("{:_>6}"), str("hey"s)) == str("___hey"));
     }
     {
-        CHECK(format("{}", "hey"sv) == "hey");
-        CHECK(format("{0: ^6}", "hey"sv) == " hey  ");
-        CHECK(format("{:_>6}", "hey"sv) == "___hey");
+        CHECK(format(str("{}"), str("hey"sv)) == str("hey"));
+        CHECK(format(str("{0: ^6}"), str("hey"sv)) == str(" hey  "));
+        CHECK(format(str("{:_>6}"), str("hey"sv)) == str("___hey"));
     }
     {
-        CHECK(format("{:}", true) == "true");
-        CHECK(format("{0: ^6}", true) == " true ");
-        CHECK(format("{:_>6}", false) == "_false");
+        CHECK(format(str("{:}"), true) == str("true"));
+        CHECK(format(str("{0: ^6}"), true) == str(" true "));
+        CHECK(format(str("{:_>6}"), false) == str("_false"));
     }
     {
-        CHECK(format("{:s}", true) == "true");
-        CHECK(format("{0: ^6s}", true) == " true ");
-        CHECK(format("{:_>6s}", false) == "_false");
+        CHECK(format(str("{:s}"), true) == str("true"));
+        CHECK(format(str("{0: ^6s}"), true) == str(" true "));
+        CHECK(format(str("{:_>6s}"), false) == str("_false"));
     }
     {
-        CHECK(format("{:c}", true) == "\x1");
-        CHECK(format("{0: ^6c}", true) == "  \x1   ");
-        CHECK(format("{:_>6c}", false) == std::string_view("_____\x0", 6));
+        CHECK(format(str("{:c}"), true) == str("\x1"));
+        CHECK(format(str("{0: ^6c}"), true) == str("  \x1   "));
+        CHECK(format(str("{:_>6c}"), false) ==
+              str(std::string_view("_____\x0", 6)));
     }
     {
-        CHECK(format("{:d}", true) == "1");
-        CHECK(format("{0: ^6d}", true) == "  1   ");
-        CHECK(format("{:_>6d}", false) == "_____0");
+        CHECK(format(str("{:d}"), true) == str("1"));
+        CHECK(format(str("{0: ^6d}"), true) == str("  1   "));
+        CHECK(format(str("{:_>6d}"), false) == str("_____0"));
     }
     {
-        CHECK(format("{}", (char)123) == "{");
-        CHECK(format("{:d}", (char)123) == "123");
-        CHECK(format("{}", (short)12345) == "12345");
-        CHECK(format("{}", 12345) == "12345");
-        CHECK(format("{}", 12345u) == "12345");
-        CHECK(format("{}", 12345l) == "12345");
-        CHECK(format("{}", 12345lu) == "12345");
-        CHECK(format("{}", 12345ll) == "12345");
-        CHECK(format("{}", 12345llu) == "12345");
+        CHECK(format(str("{}"), (char)123) == str("{"));
+        CHECK(format(str("{:d}"), (char)123) == str("123"));
+        CHECK(format(str("{}"), (short)12345) == str("12345"));
+        CHECK(format(str("{}"), 12345) == str("12345"));
+        CHECK(format(str("{}"), 12345u) == str("12345"));
+        CHECK(format(str("{}"), 12345l) == str("12345"));
+        CHECK(format(str("{}"), 12345lu) == str("12345"));
+        CHECK(format(str("{}"), 12345ll) == str("12345"));
+        CHECK(format(str("{}"), 12345llu) == str("12345"));
     }
     {
-        CHECK(format("{}", nullptr) == "0x0");
-        CHECK(format("{:p}", nullptr) == "0x0");
+        CHECK(format(str("{}"), nullptr) == str("0x0"));
+        CHECK(format(str("{:p}"), nullptr) == str("0x0"));
 
         std::uintptr_t p = 0x12345678;
-        CHECK(format("{}", reinterpret_cast<void*>(p)) == "0x12345678");
-        CHECK(format("{:p}", reinterpret_cast<void*>(p)) == "0x12345678");
-        CHECK(format("{}", reinterpret_cast<const void*>(p)) == "0x12345678");
-        CHECK(format("{:p}", reinterpret_cast<const void*>(p)) == "0x12345678");
-        {
-            bool threw = false;
-            try {
-                format("{:d}", reinterpret_cast<void*>(p));
-            } catch (lrstd::format_error&) {
-                threw = true;
-            }
-            CHECK(threw);
-        }
+        CHECK(format(str("{}"), reinterpret_cast<void*>(p)) ==
+              str("0x12345678"));
+        CHECK(format(str("{:p}"), reinterpret_cast<void*>(p)) ==
+              str("0x12345678"));
+        CHECK(format(str("{}"), reinterpret_cast<const void*>(p)) ==
+              str("0x12345678"));
+        CHECK(format(str("{:p}"), reinterpret_cast<const void*>(p)) ==
+              str("0x12345678"));
+
+        CHECK_THROWS_AS(format(str("{:d}"), reinterpret_cast<void*>(p)),
+                        lrstd::format_error);
     }
 }
 

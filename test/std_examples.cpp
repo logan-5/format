@@ -59,24 +59,9 @@ TEST_CASE("std_examples", "") {
 
     CHECK(format("{} to {}", "a", "b") == "a to b");
     CHECK(format("{1} to {0}", "a", "b") == "b to a");
-    {
-        bool threw = false;
-        try {
-            format("{0} to {}", "a", "b");
-        } catch (const lrstd::format_error&) {
-            threw = true;
-        }
-        CHECK(threw);
-    }
-    {
-        bool threw = false;
-        try {
-            format("{} to {1}", "a", "b");
-        } catch (const lrstd::format_error&) {
-            threw = true;
-        }
-        CHECK(threw);
-    }
+
+    CHECK_THROWS_AS(format("{0} to {}", "a", "b"), lrstd::format_error);
+    CHECK_THROWS_AS(format("{} to {1}", "a", "b"), lrstd::format_error);
 
     {
         char c = 120;

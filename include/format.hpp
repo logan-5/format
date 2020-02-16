@@ -1343,7 +1343,7 @@ struct format_int_storage_type<bool> {
 
 template <class Char, class Int>
 constexpr bool representable_as_char(Int i) noexcept {
-    if constexpr (sizeof(Int) == sizeof(Char)) {
+    if constexpr (sizeof(Int) <= sizeof(Char)) {
         if constexpr (std::is_signed_v<Int> == std::is_signed_v<Char>)
             return true;
         else if constexpr (std::is_signed_v<Int> && !std::is_signed_v<Char>) {
