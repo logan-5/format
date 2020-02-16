@@ -528,8 +528,8 @@ LRSTD_EXTRA_CONSTEXPR auto visit_format_arg(Visitor&& visitor,
     }
     LRSTD_UNREACHABLE();
 }
-
 namespace detail {
+
 template <class Context, class... Args>
 struct args_storage {
     std::array<basic_format_arg<Context>, sizeof...(Args)> args;
@@ -1605,21 +1605,67 @@ struct formatter_impl<long double, CharT, true>
 //////////////////////////////
 // pointer formatters
 
+struct format_pointer {
+    const void* ptr;
+    std::array<char, sizeof(void*) * 2 + 2> buf;
+
+    constexpr std::optional<char> formatted_char(std_format_spec_types::type_t,
+                                                 bool) const noexcept {
+        return std::nullopt;
+    }
+    constexpr std::string_view formatted_str(std_format_spec_types::type_t type,
+                                             bool alternate) {
+        if (alternate)
+            throw format_error("invalid '#' option for formatting pointer");
+        if (type != std_format_spec_types::type_t::p &&
+            type != std_format_spec_types::type_t::defaulted)
+            throw format_error("invalid type spec for formatting pointer");
+
+        nonoverlapping_str_writer{}(std::string_view("0x"), buf.data());
+        const auto result =
+              std::to_chars(buf.data() + 2, buf.data() + buf.size(),
+                            reinterpret_cast<std::uintptr_t>(ptr), 16);
+        LRSTD_ASSERT(result.ec == std::errc());
+        return std::string_view(buf.data(),
+                                std::distance(buf.data(), result.ptr));
+    }
+
+    static constexpr std_format_spec_types::type_t default_type() noexcept {
+        return std_format_spec_types::type_t::p;
+    }
+    static constexpr std_format_spec_types::alignment_t default_alignment(
+          std_format_spec_types::type_t) noexcept {
+        return std_format_spec_types::alignment_t::left;
+    }
+    constexpr bool is_negative() const noexcept { return false; }
+    static void validate_sign(std_format_spec_types::type_t) noexcept(false) {
+        throw format_error("sign option invalid for pointers");
+    }
+    static void validate_zero_pad(std_format_spec_types::type_t) noexcept(
+          false) {
+        throw format_error("zero padding invalid for pointers");
+    }
+    static constexpr basic_string_view<char> get_prefix(
+          std_format_spec_types::type_t,
+          bool) noexcept {
+        return {};
+    }
+};
+
 template <class Pointer, class CharT>
 struct pointer_formatter : public std_format_parser<CharT> {
     using base = std_format_parser<CharT>;
     template <typename Out>
     constexpr typename basic_format_context<Out, CharT>::iterator format(
-          Pointer,
-          basic_format_context<Out, CharT>&) {
-        throw "not yet implemented";
-        // fc.advance_to(
-        //       to_iter(base::do_format(maybe_to_raw_pointer(fc.out()),
-        //                               base::get_width(fc),
-        //                               format_int<Int>{i},
-        //                               nonoverlapping_str_writer{}),
-        //               fc.out()));
-        // return fc.out();
+          Pointer p,
+          basic_format_context<Out, CharT>& fc) {
+        fc.advance_to(to_iter(
+              base::do_format(maybe_to_raw_pointer(fc.out()),
+                              base::get_width(fc),
+                              format_pointer{static_cast<const void*>(p)},
+                              nonoverlapping_generic_writer{}),
+              fc.out()));
+        return fc.out();
     }
 };
 template <class CharT>
