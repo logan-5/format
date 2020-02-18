@@ -648,17 +648,31 @@ constexpr void advance_to(basic_string_view<CharT>& s,
     s.remove_prefix(std::distance(s.begin(), pos));
 }
 
-struct error {};
+struct parse_integer_result {
+    union {
+        std::monostate _;
+        std::size_t integer;
+    };
+    enum class type : char { none, error, success } tag;
+
+    constexpr parse_integer_result(type t) : _{}, tag{t} {}
+    constexpr parse_integer_result(std::size_t i)
+        : integer{i}, tag{type::success} {}
+
+    explicit constexpr operator bool() const noexcept {
+        return tag == type::success;
+    }
+};
 
 #if LRSTD_USE_EXTRA_CONSTEXPR
-inline constexpr std::variant<std::size_t, std::nullopt_t, error> parse_integer(
+inline constexpr parse_integer_result parse_integer(
       basic_string_view<char>& fmt) {
     basic_string_view<char>::iterator it = fmt.begin();
     auto is_digit = [](char c) { return '0' <= c && c <= '9'; };
     for (; it != fmt.end() && is_digit(*it); ++it)
         ;
     if (it == fmt.begin())
-        return std::nullopt;
+        return parse_integer_result::type::none;
 
     std::size_t place_value = 1;
     std::size_t ret = 0;
@@ -671,27 +685,25 @@ inline constexpr std::variant<std::size_t, std::nullopt_t, error> parse_integer(
     return ret;
 }
 #else
-inline std::variant<std::size_t, std::nullopt_t, error> parse_integer(
-      basic_string_view<char>& fmt) {
+inline parse_integer_result parse_integer(basic_string_view<char>& fmt) {
     std::size_t val;
     const auto result = std::from_chars(fmt.begin(), fmt.end(), val, 10);
     if (result.ptr == fmt.begin())
-        return std::nullopt;
+        return parse_integer_result::type::none;
     if (result.ec != std::errc())
-        return error{};
+        return parse_integer_result::type::error;
     advance_to(fmt, result.ptr);
     return val;
 }
 #endif
 
-inline std::variant<std::size_t, std::nullopt_t, error> parse_integer(
-      basic_string_view<wchar_t>& fmt) {
+inline parse_integer_result parse_integer(basic_string_view<wchar_t>& fmt) {
     basic_string_view<wchar_t>::iterator it = fmt.begin();
     auto is_digit = [](wchar_t c) { return L'0' <= c && c <= L'9'; };
     for (; it != fmt.end() && is_digit(*it); ++it)
         ;
     if (it == fmt.begin())
-        return std::nullopt;
+        return parse_integer_result::type::none;
 
     std::size_t place_value = 1;
     std::size_t ret = 0;
@@ -932,20 +944,18 @@ constexpr std::optional<integer_or_arg_id> parse_integer_or_arg_id(
     }
     if (match(fmt, static_cast<CharT>('{'))) {
         auto next = fmt.substr(1);
-        const auto integer = parse_integer(next);
-        if (const auto* const i = std::get_if<std::size_t>(&integer)) {
+        if (const parse_integer_result result = parse_integer(next)) {
             if (consume(next, static_cast<CharT>('}'))) {
                 fmt = next;
-                return arg_id_t{*i};
+                return arg_id_t{result.integer};
             }
         } else if (consume(next, static_cast<CharT>('}'))) {
             fmt = next;
             return arg_id_t{parse_context.next_arg_id()};
         }
     }
-    const auto integer = parse_integer(fmt);
-    if (const auto* const i = std::get_if<std::size_t>(&integer)) {
-        return *i;
+    if (const parse_integer_result result = parse_integer(fmt)) {
+        return result.integer;
     }
     return std::nullopt;
 }
@@ -1793,33 +1803,30 @@ struct result {
 };
 
 template <class CharT>
-constexpr std::variant<std::size_t, std::nullopt_t, error> parse_arg_id(
-      basic_string_view<CharT>& fmt) {
+constexpr parse_integer_result parse_arg_id(basic_string_view<CharT>& fmt) {
     if (consume(fmt, static_cast<CharT>('0')))
         return 0;
     return parse_integer(fmt);
 }
 
 template <class CharT>
-struct get_replacement_field {
-    constexpr std::optional<replacement_field<CharT>> operator()(
-          std::size_t id_) const noexcept {
-        return replacement_field<CharT>{{}, arg_id_t{id_}};
+constexpr std::optional<replacement_field<CharT>> get_replacement_field(
+      parse_integer_result i) {
+    using Tag = parse_integer_result::type;
+    switch (i.tag) {
+        case Tag::error:
+            return std::nullopt;
+        case Tag::none:
+            return replacement_field<CharT>{{}, arg_id_t::auto_id()};
+        case Tag::success:
+            return replacement_field<CharT>{{}, arg_id_t{i.integer}};
     }
-    constexpr std::optional<replacement_field<CharT>> operator()(
-          std::nullopt_t) const noexcept {
-        return replacement_field<CharT>{{}, arg_id_t::auto_id()};
-    }
-    constexpr std::optional<replacement_field<CharT>> operator()(error) const
-          noexcept {
-        return std::nullopt;
-    }
-};
+}
 
 template <class CharT>
 constexpr std::optional<replacement_field<CharT>> parse_replacement_field(
       basic_string_view<CharT>& fmt) {
-    auto field = std::visit(get_replacement_field<CharT>{}, parse_arg_id(fmt));
+    auto field = get_replacement_field<CharT>(parse_arg_id(fmt));
     if (!field)
         return std::nullopt;
     if (consume(fmt, static_cast<CharT>(':'))) {
