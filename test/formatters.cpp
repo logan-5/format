@@ -13,6 +13,13 @@ TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
     str_fn<TestType> str;
 
     {
+        CHECK(format(str("")) == str(""));
+        CHECK(format(str("hey")) == str("hey"));
+        CHECK(format(str("{}"), str("")) == str(""));
+        CHECK(format(str("he{}y"), str("")) == str("hey"));
+    }
+
+    {
         CHECK(format(str("{}"), str("hey")) == str("hey"));
         CHECK(format(str("{0: ^6}"), str("hey")) == str(" hey  "));
         CHECK(format(str("{:_>6}"), str("hey")) == str("___hey"));
@@ -85,4 +92,27 @@ TEST_CASE("weird_to_chars_bug", "[formatters][!mayfail]") {
     CHECK(lrstd::format("{}", 0x12345678ul) == "305419896");
     CHECK(lrstd::format("{}", 0x12345678ll) == "305419896");
     CHECK(lrstd::format("{}", 0x12345678ull) == "305419896");
+}
+
+TEMPLATE_TEST_CASE("escaping", "[formatters]", char, wchar_t) {
+    using lrstd::format;
+    str_fn<TestType> str;
+
+    CHECK(format(str("{{")) == str("{"));
+    CHECK(format(str("}}")) == str("}"));
+    CHECK(format(str("{}"), str("{{")) == str("{{"));
+    CHECK(format(str("{}"), str("}}")) == str("}}"));
+    CHECK(format(str("{{{{")) == str("{{"));
+    CHECK(format(str("}}}}")) == str("}}"));
+
+    CHECK_THROWS_AS(format(str("{")), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("}")), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{}}")), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("asdf{asdf")), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("asdf}asdf")), lrstd::format_error);
+
+    CHECK(format(str("{}{{"), 5) == str("5{"));
+    CHECK(format(str("{}}}"), 5) == str("5}"));
+    CHECK(format(str("{}a{{"), 5) == str("5a{"));
+    CHECK(format(str("{}a}}"), 5) == str("5a}"));
 }

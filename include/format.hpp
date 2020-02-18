@@ -1763,26 +1763,34 @@ struct formatter : public detail::formatter_impl<T, Char> {};
 namespace detail {
 
 namespace parse_fmt_str {
-using end = std::monostate;
-struct text {};
-struct escaped_lbrace {};
-struct escaped_rbrace {};
+
+template <class CharT>
+struct text {
+    basic_string_view<CharT> text;
+};
 
 template <class CharT>
 struct replacement_field {
-    arg_id_t arg_id;
     basic_string_view<CharT> format_spec;
+    arg_id_t arg_id;
 };
 
 using namespace parse_utils;
 
+enum class result_type : char { end, error, text, replacement_field };
 template <class CharT>
-using result = std::variant<end,
-                            text,
-                            escaped_lbrace,
-                            escaped_rbrace,
-                            replacement_field<CharT>,
-                            error>;
+struct result {
+    union {
+        std::monostate _;
+        text<CharT> txt;
+        replacement_field<CharT> repl;
+    };
+    result_type tag;
+    constexpr result(result_type type) noexcept : _{}, tag{type} {}
+    constexpr result(text<CharT> t) noexcept : txt{t}, tag{result_type::text} {}
+    constexpr result(replacement_field<CharT> r) noexcept
+        : repl{r}, tag{result_type::replacement_field} {}
+};
 
 template <class CharT>
 constexpr std::variant<std::size_t, std::nullopt_t, error> parse_arg_id(
@@ -1796,11 +1804,11 @@ template <class CharT>
 struct get_replacement_field {
     constexpr std::optional<replacement_field<CharT>> operator()(
           std::size_t id_) const noexcept {
-        return replacement_field<CharT>{arg_id_t{id_}, {}};
+        return replacement_field<CharT>{{}, arg_id_t{id_}};
     }
     constexpr std::optional<replacement_field<CharT>> operator()(
           std::nullopt_t) const noexcept {
-        return replacement_field<CharT>{arg_id_t::auto_id(), {}};
+        return replacement_field<CharT>{{}, arg_id_t::auto_id()};
     }
     constexpr std::optional<replacement_field<CharT>> operator()(error) const
           noexcept {
@@ -1825,48 +1833,53 @@ constexpr std::optional<replacement_field<CharT>> parse_replacement_field(
 }
 
 template <class CharT>
-struct double_lbrace;
-template <>
-struct double_lbrace<char> {
-    static constexpr std::string_view value = "{{";
-};
-template <>
-struct double_lbrace<wchar_t> {
-    static constexpr std::wstring_view value = L"{{";
-};
-
-template <class CharT>
-struct double_rbrace;
-template <>
-struct double_rbrace<char> {
-    static constexpr std::string_view value = "}}";
-};
-template <>
-struct double_rbrace<wchar_t> {
-    static constexpr std::wstring_view value = L"}}";
-};
+constexpr basic_string_view<CharT> lrbrace() noexcept {
+    if constexpr (std::is_same_v<CharT, char>) {
+        return "{}";
+    } else if constexpr (std::is_same_v<CharT, wchar_t>) {
+        return L"{}";
+    }
+}
 
 template <class CharT>
 constexpr result<CharT> parse_next(basic_string_view<CharT>& fmt) {
     if (fmt.empty())
-        return end{};
+        return result_type::end;
 
-    if (consume(fmt, double_lbrace<CharT>::value))
-        return escaped_lbrace{};
-    if (consume(fmt, double_rbrace<CharT>::value))
-        return escaped_rbrace{};
-
-    const auto next_lbrace_it = find(fmt, static_cast<CharT>('{'));
-    if (next_lbrace_it != fmt.begin()) {
-        advance_to(fmt, next_lbrace_it);
-        return text{};
+    const auto idx = fmt.find_first_of(lrbrace<CharT>());
+    if (idx == basic_string_view<CharT>::npos) {
+        const auto txt = fmt;
+        advance_to(fmt, fmt.end());
+        return text<CharT>{txt};
+    }
+    if (fmt[idx] == static_cast<CharT>('}')) {
+        if (idx + 1 == fmt.size() || fmt[idx + 1] != static_cast<CharT>('}')) {
+            return result_type::error;
+        }
+        const auto txt = fmt.substr(0, idx + 1);
+        advance_to(fmt, fmt.begin() + (idx + 2));
+        return text<CharT>{txt};
     }
 
-    // beginning is '{'
+    LRSTD_ASSERT(fmt[idx] == static_cast<CharT>('{'));
+    if (idx + 1 == fmt.size()) {
+        return result_type::error;
+    }
+    if (fmt[idx + 1] == static_cast<CharT>('{')) {
+        const auto txt = fmt.substr(0, idx + 1);
+        advance_to(fmt, fmt.begin() + (idx + 2));
+        return text<CharT>{txt};
+    }
+    if (idx != 0) {
+        const auto txt = fmt.substr(0, idx);
+        advance_to(fmt, fmt.begin() + idx);
+        return text<CharT>{txt};
+    }
+
     fmt.remove_prefix(1);
     const auto result = parse_replacement_field(fmt);
     if (!result || !consume(fmt, static_cast<CharT>('}')))
-        return error{};
+        return result_type::error;
     return *result;
 }
 
@@ -1913,46 +1926,33 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
 
     namespace p = parse_fmt_str;
     while (true) {
-        auto old_begin = fmt.begin();
-        p::result<CharT> r = p::parse_next(fmt);
-        if (std::holds_alternative<p::end>(r))
-            break;
-        if (std::holds_alternative<p::error>(r))
-            throw format_error("bad format string");
-        std::visit(
-              overloaded{
-                    unreachable<p::end>{}, unreachable<p::error>{},
-                    [&](p::text) {
-                        context.advance_to(overlapping_str_writer{}(
-                              basic_string_view<CharT>{
-                                    old_begin,
-                                    static_cast<std::size_t>(std::distance(
-                                          old_begin, fmt.begin()))},
-                              context.out()));
-                    },
-                    [&](p::escaped_lbrace) {
-                        const CharT c = static_cast<CharT>('{');
-                        context.advance_to(overlapping_str_writer{}(
-                              basic_string_view<CharT>{&c, 1}, context.out()));
-                    },
-                    [&](p::escaped_rbrace) {
-                        const CharT c = static_cast<CharT>('}');
-                        context.advance_to(overlapping_str_writer{}(
-                              basic_string_view<CharT>{&c, 1}, context.out()));
-                    },
-                    [&](p::replacement_field<CharT> field) {
-                        parse_context._begin = field.format_spec.begin();
-                        parse_context._end = field.format_spec.end();
-                        arg_out(context, parse_context,
-                                context.arg(field.arg_id.is_auto()
-                                                  ? parse_context.next_arg_id()
-                                                  : (parse_context.check_arg_id(
-                                                           field.arg_id._id),
-                                                     field.arg_id._id)));
-                    }},
-              r);
+        const p::result<CharT> r = p::parse_next(fmt);
+        switch (r.tag) {
+            case p::result_type::end:
+                return context.out();
+            case p::result_type::error:
+                throw format_error("bad format string");
+
+            case p::result_type::text:
+                context.advance_to(
+                      overlapping_str_writer{}(r.txt.text, context.out()));
+                continue;
+
+            case p::result_type::replacement_field: {
+                const p::replacement_field<CharT>& field = r.repl;
+                parse_context._begin = field.format_spec.begin();
+                parse_context._end = field.format_spec.end();
+                arg_out(context, parse_context,
+                        context.arg(field.arg_id.is_auto()
+                                          ? parse_context.next_arg_id()
+                                          : (parse_context.check_arg_id(
+                                                   field.arg_id._id),
+                                             field.arg_id._id)));
+            }
+                continue;
+        }
+        LRSTD_UNREACHABLE();
     }
-    return context.out();
 }
 
 template <class CharT>
