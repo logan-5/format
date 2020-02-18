@@ -774,7 +774,18 @@ struct arg_id_t {
 };
 
 namespace std_format_spec_types {
-using integer_or_arg_id = std::variant<std::size_t, arg_id_t>;
+
+struct integer_or_arg_id {
+    union {
+        std::size_t integer;
+        arg_id_t arg_id;
+    };
+    enum class which : char { integer, arg_id } tag;
+    constexpr integer_or_arg_id(std::size_t i = 0)
+        : integer{i}, tag{which::integer} {}
+    constexpr integer_or_arg_id(arg_id_t arg)
+        : arg_id{arg}, tag{which::arg_id} {}
+};
 
 enum class alignment_t : char {
     defaulted,
@@ -833,59 +844,6 @@ struct std_format_spec {
     integer_or_arg_id precision;
     type_t type{type_t::defaulted};
 };
-
-inline std::string dump(const std_format_spec<char>& s) {
-    using namespace std::string_literals;
-    std::string ret = "format-spec{";
-    ret += "fill: "s + s.fill;
-    ret += ", align: ";
-    switch (s.align) {
-        case alignment_t::left:
-            ret += "left";
-            break;
-        case alignment_t::right:
-            ret += "right";
-            break;
-        case alignment_t::center:
-            ret += "center";
-            break;
-        default:
-            ret += "invalid!!";
-            break;
-    }
-    ret += ", alternate: "s + (s.alternate ? "true" : "false");
-    ret += ", sign: ";
-    switch (s.sign) {
-        case sign_t::plus:
-            ret += "plus";
-            break;
-        case sign_t::minus:
-            ret += "minus";
-            break;
-        case sign_t::space:
-            ret += "space";
-            break;
-        default:
-            ret += "invalid!!";
-            break;
-    }
-    ret += ", width: ("s +
-           std::visit(
-                 overloaded{[](std::size_t s) { return std::to_string(s); },
-                            [](arg_id_t a) { return std::to_string(a._id); }},
-                 s.width.i) +
-           ", " + (s.width.zero_pad ? "true" : "false");
-    ret += ", precision: "s +
-           std::visit(
-                 overloaded{[](std::size_t s) { return std::to_string(s); },
-                            [](arg_id_t a) { return std::to_string(a._id); }},
-                 s.precision);
-    ret += ", type: "s + static_cast<char>(s.type) + "}";
-    return ret;
-}
-inline std::wstring dump(const std_format_spec<wchar_t>&) {
-    throw "not implemented";
-}
 
 template <class CharT>
 constexpr std::optional<alignment_t> parse_align(
@@ -1183,6 +1141,8 @@ struct sign_char {
     }
 };
 
+namespace fst = std_format_spec_types;
+
 template <class CharT>
 struct std_format_parser {
     parse_std_format_spec::std_format_spec<CharT> format_spec;
@@ -1196,34 +1156,32 @@ struct std_format_parser {
 
     template <typename Out>
     constexpr std::size_t get_width(basic_format_context<Out, CharT>& fc) {
-        return std::visit(
-              overloaded{[](std::size_t w) { return w; },
-                         [&](auto w) {
-                             return visit_format_arg(
-                                   [](auto arg) -> std::size_t {
-                                       if constexpr (std::is_integral_v<
-                                                           decltype(arg)>) {
-                                           return arg;
-                                       } else {
-                                           throw format_error(
-                                                 "width is not integral");
-                                       }
-                                   },
-                                   fc.arg(w._id));
-                         }},
-              format_spec.width.i);
+        using I = parse_std_format_spec::integer_or_arg_id;
+        switch (format_spec.width.i.tag) {
+            case I::which::integer:
+                return format_spec.width.i.integer;
+            case I::which::arg_id:
+                return visit_format_arg(
+                      [](auto arg) noexcept(std::is_integral_v<decltype(arg)>) -> std::size_t {
+                          if constexpr (std::is_integral_v<decltype(arg)>) {
+                              return arg;
+                          } else {
+                              throw format_error("width is not integral");
+                          }
+                      },
+                      fc.arg(format_spec.width.i.arg_id._id));
+        }
     }
 
     template <class Out>
-    static constexpr Out write_prefix(
+     constexpr Out write_prefix(
           Out out,
           std::size_t width,
           const std::size_t value_width,
           const basic_string_view<char> prefix,
           const std_format_spec_types::alignment_t align,
           const bool zero_pad,
-          const CharT sign_char,
-          const CharT fill_char) noexcept {
+          const CharT sign_char) const noexcept {
         const bool has_sign = sign_char != '\0';
         nonoverlapping_generic_writer writer;
         auto write_sign_and_prefix = [&] {
@@ -1252,17 +1210,16 @@ struct std_format_parser {
             const auto fill_count = align == alignment_t::right
                                           ? padding_chars
                                           : padding_chars / 2;
-            out = writer(fill_char, fill_count, out);
+            out = writer(format_spec.fill, fill_count, out);
         }
         return write_sign_and_prefix();
     }
     template <typename Out>
-    static constexpr Out write_suffix(Out out,
+     constexpr Out write_suffix(Out out,
                                       std::size_t width,
                                       std::size_t value_and_prefix_width,
                                       std_format_spec_types::alignment_t align,
-                                      bool zero_pad,
-                                      CharT fill) {
+                                      bool zero_pad) const {
         if (zero_pad || value_and_prefix_width >= width)
             return out;
 
@@ -1271,11 +1228,11 @@ struct std_format_parser {
             case alignment_t::center: {
                 const auto padding_chars = width - value_and_prefix_width;
                 return repeated_char_writer{}(
-                      fill, padding_chars / 2 + (padding_chars & 1), out);
+                      format_spec.fill, padding_chars / 2 + (padding_chars & 1), out);
             }
             case alignment_t::left: {
                 const auto padding_chars = width - value_and_prefix_width;
-                return repeated_char_writer{}(fill, padding_chars, out);
+                return repeated_char_writer{}(format_spec.fill, padding_chars, out);
             }
             case alignment_t::right:
                 return out;
@@ -1289,7 +1246,7 @@ struct std_format_parser {
     constexpr Out do_format(Out out,
                             const std::size_t width,
                             FormatFunc&& f,
-                            Writer&& writer) {
+                            Writer writer) {
         using namespace std_format_spec_types;
         const type_t type = is_defaulted(format_spec.type) ? f.default_type()
                                                            : format_spec.type;
@@ -1300,30 +1257,52 @@ struct std_format_parser {
         }
         const alignment_t align =
               default_align ? f.default_alignment(type) : format_spec.align;
-        const auto formatted_char =
-              f.formatted_char(type, format_spec.alternate);
-        using str_type = decltype(f.formatted_str(type, format_spec.alternate));
-        const auto formatted_str =
-              formatted_char ? str_type()
-                             : f.formatted_str(type, format_spec.alternate);
-        const std::size_t value_width =
-              formatted_char ? 1 : formatted_str.size();
         const char sign = sign_char{}(format_spec.sign, f.is_negative());
         if (sign != '\0') {
             f.validate_sign(type);
         }
+        if (type == type_t::c) {
+            return do_char_format(out, width, f, writer, align);
+        }
+        return do_str_format(out, width, f, writer, sign, align, type,
+                             zero_pad);
+    }
+
+    template <class Out, class FormatFunc, class Writer>
+    constexpr Out do_str_format(Out out,
+                                const std::size_t width,
+                                FormatFunc&& f,
+                                Writer writer,
+                                char sign,
+                                fst::alignment_t align,
+                                fst::type_t type,
+                                bool zero_pad) {
+        const auto formatted_str = f.formatted_str(type, format_spec.alternate);
+        const std::size_t value_width = formatted_str.size();
         const std::string_view prefix =
               f.get_prefix(type, format_spec.alternate);
         out = write_prefix(out, width, value_width, prefix, align, zero_pad,
-                           sign, format_spec.fill);
-        if (formatted_char)
-            out = writer(*formatted_char, out);
-        else
-            out = writer(formatted_str, out);
+                           sign);
+        out = writer(formatted_str, out);
         const std::size_t value_and_prefix_width =
               value_width + prefix.size() + (sign != '\0');
-        out = write_suffix(out, width, value_and_prefix_width, align, zero_pad,
-                           format_spec.fill);
+        out = write_suffix(out, width, value_and_prefix_width, align, zero_pad);
+        return out;
+    }
+
+    template <class Out, class FormatFunc, class Writer>
+    constexpr Out do_char_format(Out out,
+                                 const std::size_t width,
+                                 FormatFunc&& f,
+                                 Writer writer,
+                                 fst::alignment_t align) {
+        const auto formatted_char = f.formatted_char();
+        const std::size_t value_width = 1;
+        const std::string_view prefix;
+        out = write_prefix(out, width, value_width, prefix, align, false, '\0');
+        out = writer(formatted_char, out);
+        const std::size_t value_and_prefix_width = value_width;
+        out = write_suffix(out, width, value_and_prefix_width, align, false);
         return out;
     }
 };
@@ -1513,16 +1492,10 @@ struct format_int_common {
 
 template <class Int, class CharT>
 struct format_int : public format_int_common<Int> {
-    constexpr std::optional<CharT> formatted_char(
-          std_format_spec_types::type_t type,
-          bool) const {
-        if (type == std_format_spec_types::type_t::c) {
-            if (!representable_as_char<CharT>(this->i))
-                throw format_error(
-                      "integer is not in representable range of char");
-            return static_cast<CharT>(this->i);
-        }
-        return std::nullopt;
+    constexpr CharT formatted_char() const {
+        if (!representable_as_char<CharT>(this->i))
+            throw format_error("integer is not in representable range of char");
+        return static_cast<CharT>(this->i);
     }
 };
 
@@ -1619,10 +1592,7 @@ struct format_pointer {
     const void* ptr;
     std::array<char, sizeof(void*) * 2 + 2> buf;
 
-    constexpr std::optional<char> formatted_char(std_format_spec_types::type_t,
-                                                 bool) const noexcept {
-        return std::nullopt;
-    }
+    char formatted_char() const { LRSTD_UNREACHABLE(); }
     constexpr std::string_view formatted_str(std_format_spec_types::type_t type,
                                              bool alternate) {
         if (alternate)
@@ -1695,10 +1665,7 @@ template <class CharT, class Traits>
 struct format_str {
     std::basic_string_view<CharT, Traits> s;
 
-    constexpr std::optional<CharT> formatted_char(std_format_spec_types::type_t,
-                                                  bool) const noexcept {
-        return std::nullopt;
-    }
+    CharT formatted_char() const { LRSTD_UNREACHABLE(); }
     constexpr std::basic_string_view<CharT, Traits> formatted_str(
           std_format_spec_types::type_t type,
           bool alternate) const {
@@ -1859,35 +1826,35 @@ constexpr result<CharT> parse_next(basic_string_view<CharT>& fmt) {
         advance_to(fmt, fmt.end());
         return text<CharT>{txt};
     }
-    if (fmt[idx] == static_cast<CharT>('}')) {
-        if (idx + 1 == fmt.size() || fmt[idx + 1] != static_cast<CharT>('}')) {
-            return result_type::error;
-        }
-        const auto txt = fmt.substr(0, idx + 1);
-        advance_to(fmt, fmt.begin() + (idx + 2));
-        return text<CharT>{txt};
-    }
-
-    LRSTD_ASSERT(fmt[idx] == static_cast<CharT>('{'));
     if (idx + 1 == fmt.size()) {
         return result_type::error;
     }
-    if (fmt[idx + 1] == static_cast<CharT>('{')) {
-        const auto txt = fmt.substr(0, idx + 1);
-        advance_to(fmt, fmt.begin() + (idx + 2));
-        return text<CharT>{txt};
-    }
-    if (idx != 0) {
-        const auto txt = fmt.substr(0, idx);
-        advance_to(fmt, fmt.begin() + idx);
-        return text<CharT>{txt};
+    if (fmt[idx] == static_cast<CharT>('{')) {
+        if (fmt[idx + 1] == static_cast<CharT>('{')) {
+            const auto txt = fmt.substr(0, idx + 1);
+            advance_to(fmt, fmt.begin() + (idx + 2));
+            return text<CharT>{txt};
+        }
+        if (idx != 0) {
+            const auto txt = fmt.substr(0, idx);
+            advance_to(fmt, fmt.begin() + idx);
+            return text<CharT>{txt};
+        }
+
+        fmt.remove_prefix(1);
+        const auto result = parse_replacement_field(fmt);
+        if (!result || !consume(fmt, static_cast<CharT>('}')))
+            return result_type::error;
+        return *result;
     }
 
-    fmt.remove_prefix(1);
-    const auto result = parse_replacement_field(fmt);
-    if (!result || !consume(fmt, static_cast<CharT>('}')))
+    LRSTD_ASSERT(fmt[idx] == '}');
+    if (idx + 1 == fmt.size() || fmt[idx + 1] != static_cast<CharT>('}')) {
         return result_type::error;
-    return *result;
+    }
+    const auto txt = fmt.substr(0, idx + 1);
+    advance_to(fmt, fmt.begin() + (idx + 2));
+    return text<CharT>{txt};
 }
 
 }  // namespace parse_fmt_str
@@ -1906,7 +1873,7 @@ constexpr void arg_out(Context& fc,
     visit_format_arg(
           overloaded{
                 throw_uninitialized_format_arg<std::monostate>{},
-                [&](const typename basic_format_arg<Context>::handle& handle) {
+                [&](const typename basic_format_arg<Context>::handle handle) {
                     handle.format(pc, fc);
                 },
                 [&](const auto val) {
