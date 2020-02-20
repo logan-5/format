@@ -5,7 +5,7 @@ option(FORMAT_BUILD_TESTS "build tests" OFF)
 if(${FORMAT_BUILD_TESTS})
     enable_testing()
     add_subdirectory(test)
-    add_subdirectory(constexpr_test)
+    # add_subdirectory(constexpr_test)
 endif()
 
 add_library(format INTERFACE)
