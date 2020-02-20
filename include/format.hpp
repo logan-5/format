@@ -985,8 +985,7 @@ constexpr std_format_spec<CharT> parse(
 
     range<CharT> fmt(parse_context.begin(), parse_context.end());
 
-    if (fmt.empty())
-        return r;
+    LRSTD_ASSERT(!fmt.empty());
 
     if (const auto fill_and_align = parse_fill_and_align(fmt)) {
         r.fill = fill_and_align->first;
@@ -2086,45 +2085,45 @@ constexpr basic_string_view<CharT> lrbrace() noexcept {
 
 template <class CharT, class Callbacks>
 constexpr bool parse(range<CharT> fmt, Callbacks cb) {
+    auto write_text = [&](range<CharT> text) {
+        while (!text.empty()) {
+            auto rbrace_it = text.find('}');
+            if (rbrace_it == text.end()) {
+                cb.text(text);
+                break;
+            }
+            ++rbrace_it;
+            if (rbrace_it == text.end() || *rbrace_it != '}')
+                return false;
+            cb.text(range<CharT>{text.begin(), rbrace_it});
+            text.advance_to(rbrace_it + 1);
+        }
+        return true;
+    };
+
     while (!fmt.empty()) {
         const auto lbrace_it = fmt.find('{');
-        const auto rbrace_it = fmt.find('}');
-        if (lbrace_it == fmt.end() && rbrace_it == fmt.end()) {
-            cb.text(fmt);
-            break;
+        if (lbrace_it == fmt.end()) {
+            return write_text(fmt);
         }
-        if (lbrace_it < rbrace_it) {
-            auto next = lbrace_it + 1;
-            if (next == fmt.end())
-                return false;
-            if (*next == '{') {
-                range<CharT> text{fmt.begin(), next};
-                fmt.advance_to(next + 1);
-                cb.text(text);
-            } else if (*next == '}') {
-                range<CharT> text{fmt.begin(), lbrace_it};
-                fmt.advance_to(next + 1);
-                cb.text(text);
-                cb.replacement_field(
-                      replacement_field<CharT>{{}, arg_id_t::auto_id()});
-            } else {
-                range<CharT> text{fmt.begin(), lbrace_it};
-                fmt.advance_to(next);
-                cb.text(text);
-                const auto result = parse_replacement_field(fmt);
-                if (!result || !fmt.consume(static_cast<CharT>('}')))
-                    return false;
-                cb.replacement_field(*result);
-            }
+        auto next = lbrace_it + 1;
+        if (next == fmt.end())
+            return false;
+        if (*next == '{') {
+            write_text(range<CharT>{fmt.begin(), next});
+            fmt.advance_to(next + 1);
+        } else if (*next == '}') {
+            write_text(range<CharT>{fmt.begin(), lbrace_it});
+            fmt.advance_to(next + 1);
+            cb.replacement_field(
+                  replacement_field<CharT>{{}, arg_id_t::auto_id()});
         } else {
-            auto next = rbrace_it + 1;
-            if (next != fmt.end() && *next == '}') {
-                range<CharT> text{fmt.begin(), next};
-                fmt.advance_to(next + 1);
-                cb.text(text);
-            } else {
+            write_text(range<CharT>{fmt.begin(), lbrace_it});
+            fmt.advance_to(next);
+            const auto result = parse_replacement_field(fmt);
+            if (!result || !fmt.consume(static_cast<CharT>('}')))
                 return false;
-            }
+            cb.replacement_field(*result);
         }
     }
     return true;
