@@ -860,15 +860,17 @@ namespace parse_std_format_spec {
 using namespace parse_utils;
 using namespace std_format_spec_types;
 
-template <class CharT>
-struct std_format_spec {
-    CharT fill{' '};
+struct std_format_spec_base {
     alignment_t align{alignment_t::defaulted};
     bool alternate = false;
     sign_t sign{sign_t::minus};
     width_t width;
     integer_or_arg_id precision;
     type_t type{type_t::defaulted};
+};
+template <class CharT>
+struct std_format_spec : std_format_spec_base {
+    CharT fill{' '};
 };
 
 template <class CharT>
@@ -1151,6 +1153,7 @@ using nonoverlapping_generic_writer = overloaded<nonoverlapping_str_writer,
 namespace fst = std_format_spec_types;
 
 using parse_std_format_spec::std_format_spec;
+using parse_std_format_spec::std_format_spec_base;
 
 template <class CharT>
 struct std_formatter_driver {
@@ -1316,8 +1319,7 @@ struct char_default_engine {
 };
 
 struct char_spec_delegate {
-    template <class CharT>
-    constexpr void set_defaults(std_format_spec<CharT>& spec) const noexcept {
+    constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         using namespace std_format_spec_types;
         if (is_defaulted(spec.type)) {
             spec.type = type_t::c;
@@ -1327,8 +1329,7 @@ struct char_spec_delegate {
                                                 : alignment_t::right;
         }
     }
-    template <class CharT>
-    constexpr void verify(const std_format_spec<CharT>&) const {
+    constexpr void verify(const std_format_spec_base&) const {
         // TODO
     }
 };
@@ -1362,8 +1363,7 @@ struct bool_default_engine {
 };
 
 struct bool_spec_delegate {
-    template <class CharT>
-    constexpr void set_defaults(std_format_spec<CharT>& spec) const noexcept {
+    constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         using namespace std_format_spec_types;
         if (is_defaulted(spec.type)) {
             spec.type = type_t::s;
@@ -1373,8 +1373,7 @@ struct bool_spec_delegate {
                                                 : alignment_t::right;
         }
     }
-    template <class CharT>
-    constexpr void verify(const std_format_spec<CharT>&) const {
+    constexpr void verify(const std_format_spec_base&) const {
         // TODO
     }
 };
@@ -1403,6 +1402,11 @@ template <class Int>
 using temp_stack_buffer = std::array<char, sizeof(Int) * 8>;
 
 template <class Int>
+using int_template_type = std::conditional_t<std::is_signed_v<Int>,
+                                             long long int,
+                                             unsigned long long int>;
+
+template <class Int>
 struct integer_default_engine {
     Int i;
     template <class Out>
@@ -1414,46 +1418,17 @@ struct integer_default_engine {
     }
 };
 
-template <class Int>
 struct integer_spec_engine_common {
-   protected:
-    typename format_int_storage_type<Int>::type i;
-    char sign_char;
-    std::string_view prefix;
-
-   private:
-    temp_stack_buffer<Int> buf;
-
-   protected:
-    char* buf_ptr;
-    std::size_t buf_size;
-
-   public:
-    template <class CharT>
-    integer_spec_engine_common(Int i, const std_format_spec<CharT>& spec)
-        : i{i}
-        , sign_char{get_sign_char(spec.sign, i)}
-        , prefix{get_prefix(spec.type, spec.alternate)} {
-        auto result = std::to_chars(buf.data(), buf.data() + buf.size(),
-                                    this->i, get_base(spec.type));
-        buf_ptr = buf.data() + (i < 0);
-        buf_size = result.ptr - buf_ptr;
-        if (spec.type == fst::type_t::X) {
-            std::transform(buf_ptr, buf_ptr + buf_size, buf_ptr,
-                           [](char c) { return std::toupper(c); });
-        }
-    }
-
     static constexpr char get_sign_char(std_format_spec_types::sign_t sign,
-                                        Int i) noexcept {
+                                        bool negative) noexcept {
         using S = std_format_spec_types::sign_t;
         switch (sign) {
             case S::plus:
-                return i < 0 ? '-' : '+';
+                return negative ? '-' : '+';
             case S::minus:
-                return i < 0 ? '-' : '\0';
+                return negative ? '-' : '\0';
             case S::space:
-                return i < 0 ? '-' : ' ';
+                return negative ? '-' : ' ';
         }
         LRSTD_UNREACHABLE();
     }
@@ -1477,10 +1452,10 @@ struct integer_spec_engine_common {
                 return "0";
 
                 // clang-format off
-				case T::d: case T::c: case T::n: case T::s: case T::a: case T::A:
-				case T::e: case T::E: case T::f: case T::F: case T::g: case T::G:
-				case T::p:
-					return {};
+					case T::d: case T::c: case T::n: case T::s: case T::a: case T::A:
+					case T::e: case T::E: case T::f: case T::F: case T::g: case T::G:
+					case T::p:
+						return {};
                 // clang-format on
 
             case T::defaulted:
@@ -1503,9 +1478,9 @@ struct integer_spec_engine_common {
                 return 8;
 
                 // clang-format off
-				case T::c: case T::n: case T::s: case T::a: case T::A:
-				case T::e: case T::E: case T::f: case T::F: case T::g: case T::G:
-				case T::p: case T::defaulted:
+					case T::c: case T::n: case T::s: case T::a: case T::A:
+					case T::e: case T::E: case T::f: case T::F: case T::g: case T::G:
+					case T::p: case T::defaulted:
                 // clang-format on
                 break;
         }
@@ -1513,9 +1488,38 @@ struct integer_spec_engine_common {
     }
 };
 
+template <class Int>
+struct integer_spec_engine_base : integer_spec_engine_common {
+   protected:
+    typename format_int_storage_type<Int>::type i;
+    char sign_char;
+    std::string_view prefix;
+
+   private:
+    temp_stack_buffer<Int> buf;
+
+   protected:
+    char* buf_ptr;
+    std::size_t buf_size;
+
+   public:
+    integer_spec_engine_base(Int i, const std_format_spec_base& spec)
+        : i{i}
+        , sign_char{get_sign_char(spec.sign, i < 0)}
+        , prefix{get_prefix(spec.type, spec.alternate)} {
+        auto result = std::to_chars(buf.data(), buf.data() + buf.size(),
+                                    this->i, get_base(spec.type));
+        buf_ptr = buf.data() + (i < 0);
+        buf_size = result.ptr - buf_ptr;
+        if (spec.type == fst::type_t::X) {
+            std::transform(buf_ptr, buf_ptr + buf_size, buf_ptr,
+                           [](char c) { return std::toupper(c); });
+        }
+    }
+};
+
 struct integer_spec_delegate {
-    template <class CharT>
-    constexpr void set_defaults(std_format_spec<CharT>& spec) noexcept {
+    constexpr void set_defaults(std_format_spec_base& spec) noexcept {
         using namespace std_format_spec_types;
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::right;
@@ -1526,15 +1530,14 @@ struct integer_spec_delegate {
             spec.type = type_t::d;
         }
     }
-    template <class CharT>
-    constexpr void verify(const std_format_spec<CharT>&) const {
+    constexpr void verify(const std_format_spec_base&) const {
         // TODO
     }
 };
 
 template <class Int, class CharT>
-struct integer_simple_spec_engine : integer_spec_engine_common<Int> {
-    using base = integer_spec_engine_common<Int>;
+struct integer_simple_spec_engine : integer_spec_engine_base<Int> {
+    using base = integer_spec_engine_base<Int>;
 
     std::size_t value_width() const noexcept { return base::buf_size; }
 
@@ -1569,8 +1572,8 @@ struct integer_simple_spec_engine : integer_spec_engine_common<Int> {
     }
 };
 template <class Int, class CharT>
-struct integer_zero_pad_spec_engine : integer_spec_engine_common<Int> {
-    using base = integer_spec_engine_common<Int>;
+struct integer_zero_pad_spec_engine : integer_spec_engine_base<Int> {
+    using base = integer_spec_engine_base<Int>;
 
     std::size_t value_width() const noexcept { return base::buf_size; }
 
@@ -1614,18 +1617,13 @@ constexpr bool representable_as_char(Int i) noexcept {
     }
 }
 
-template <class Int, class CharT, class SpecDelegate, class DefaultEngine>
-struct int_formatter : public std_formatter_driver<CharT> {
+template <class CharT, class SpecDelegate>
+struct int_formatter_base : public std_formatter_driver<CharT> {
     using base = std_formatter_driver<CharT>;
-    template <typename Out>
-    constexpr typename basic_format_context<Out, CharT>::iterator format(
-          Int i,
-          basic_format_context<Out, CharT>& fc) {
-        if (!base::spec) {
-            fc.advance_to(DefaultEngine{i}.write_value(fc.out()));
-            return fc.out();
-        }
 
+   protected:
+    template <class Int, typename Out>
+    constexpr Out format_impl(Int i, basic_format_context<Out, CharT>& fc) {
         base::finalize_spec(SpecDelegate{});
 
         using T = std_format_spec_types::type_t;
@@ -1651,66 +1649,89 @@ struct int_formatter : public std_formatter_driver<CharT> {
     }
 };
 
+template <class Int, class CharT, class SpecDelegate, class DefaultEngine>
+struct int_formatter : public int_formatter_base<CharT, SpecDelegate> {
+    using base = int_formatter_base<CharT, SpecDelegate>;
+    template <typename Out>
+    constexpr Out format(Int i, basic_format_context<Out, CharT>& fc) {
+        if (!base::spec) {
+            fc.advance_to(DefaultEngine{i}.write_value(fc.out()));
+            return fc.out();
+        }
+        return base::format_impl(static_cast<int_template_type<Int>>(i), fc);
+    }
+};
+
 template <class CharT>
 struct formatter_impl<signed char, CharT, true>
-    : public int_formatter<signed char,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<signed char>> {};
+    : public int_formatter<
+            signed char,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<signed char>>> {};
 template <class CharT>
 struct formatter_impl<unsigned char, CharT, true>
-    : public int_formatter<unsigned char,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<unsigned char>> {};
+    : public int_formatter<
+            unsigned char,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<unsigned char>>> {};
 template <class CharT>
 struct formatter_impl<short int, CharT, true>
-    : public int_formatter<short int,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<short int>> {};
+    : public int_formatter<
+            short int,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<short int>>> {};
 template <class CharT>
 struct formatter_impl<unsigned short int, CharT, true>
-    : public int_formatter<unsigned short int,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<unsigned short int>> {};
+    : public int_formatter<
+            unsigned short int,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<unsigned short int>>> {};
 template <class CharT>
 struct formatter_impl<int, CharT, true>
     : public int_formatter<int,
                            CharT,
                            integer_spec_delegate,
-                           integer_default_engine<int>> {};
+                           integer_default_engine<int_template_type<int>>> {};
 template <class CharT>
 struct formatter_impl<unsigned int, CharT, true>
-    : public int_formatter<unsigned int,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<unsigned int>> {};
+    : public int_formatter<
+            unsigned int,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<unsigned int>>> {};
 template <class CharT>
 struct formatter_impl<long int, CharT, true>
-    : public int_formatter<long int,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<long int>> {};
+    : public int_formatter<
+            long int,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<long int>>> {};
 template <class CharT>
 struct formatter_impl<unsigned long int, CharT, true>
-    : public int_formatter<unsigned long int,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<unsigned long int>> {};
+    : public int_formatter<
+            unsigned long int,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<unsigned long int>>> {};
 template <class CharT>
 struct formatter_impl<long long int, CharT, true>
-    : public int_formatter<long long int,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<long long int>> {};
+    : public int_formatter<
+            long long int,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<long long int>>> {};
 template <class CharT>
 struct formatter_impl<unsigned long long int, CharT, true>
-    : public int_formatter<unsigned long long int,
-                           CharT,
-                           integer_spec_delegate,
-                           integer_default_engine<unsigned long long int>> {};
+    : public int_formatter<
+            unsigned long long int,
+            CharT,
+            integer_spec_delegate,
+            integer_default_engine<int_template_type<unsigned long long int>>> {
+};
 
 template <class CharT>
 struct formatter_impl<bool, CharT, true>
@@ -1739,9 +1760,7 @@ template <class Float, class CharT>
 struct float_formatter : public std_formatter_driver<CharT> {
     using base = std_formatter_driver<CharT>;
     template <typename Out>
-    constexpr typename basic_format_context<Out, CharT>::iterator format(
-          Float,
-          basic_format_context<Out, CharT>&) {
+    constexpr Out format(Float, basic_format_context<Out, CharT>&) {
         throw "not yet implemented";
         // fc.advance_to(
         //       to_iter(base::do_format(maybe_to_raw_pointer(fc.out()),
@@ -1766,8 +1785,7 @@ struct formatter_impl<long double, CharT, true>
 // pointer formatters
 
 struct ptr_spec_delegate {
-    template <class CharT>
-    constexpr void set_defaults(std_format_spec<CharT>& spec) const noexcept {
+    constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         using namespace std_format_spec_types;
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::left;
@@ -1776,8 +1794,7 @@ struct ptr_spec_delegate {
             spec.type = type_t::p;
         }
     }
-    template <class CharT>
-    constexpr void verify(const std_format_spec<CharT>& spec) const {
+    constexpr void verify(const std_format_spec_base& spec) const {
         using namespace std_format_spec_types;
         if (spec.type != type_t::p)
             throw format_error("invalid format type for pointer");
@@ -1825,50 +1842,6 @@ struct ptr_spec_engine : ptr_default_engine {
     }
 };
 
-struct format_pointer {
-    const void* ptr;
-    std::array<char, sizeof(void*) * 2 + 2> buf;
-
-    char formatted_char() const { LRSTD_UNREACHABLE(); }
-    constexpr std::string_view formatted_str(std_format_spec_types::type_t type,
-                                             bool alternate) {
-        if (alternate)
-            throw format_error("invalid '#' option for formatting pointer");
-        if (type != std_format_spec_types::type_t::p &&
-            type != std_format_spec_types::type_t::defaulted)
-            throw format_error("invalid type spec for formatting pointer");
-
-        nonoverlapping_str_writer{}(std::string_view("0x"), buf.data());
-        const auto result =
-              std::to_chars(buf.data() + 2, buf.data() + buf.size(),
-                            reinterpret_cast<std::uintptr_t>(ptr), 16);
-        LRSTD_ASSERT(result.ec == std::errc());
-        return std::string_view(buf.data(),
-                                std::distance(buf.data(), result.ptr));
-    }
-
-    static constexpr std_format_spec_types::type_t default_type() noexcept {
-        return std_format_spec_types::type_t::p;
-    }
-    static constexpr std_format_spec_types::alignment_t default_alignment(
-          std_format_spec_types::type_t) noexcept {
-        return std_format_spec_types::alignment_t::left;
-    }
-    constexpr bool is_negative() const noexcept { return false; }
-    static void validate_sign(std_format_spec_types::type_t) noexcept(false) {
-        throw format_error("sign option invalid for pointers");
-    }
-    static void validate_zero_pad(std_format_spec_types::type_t) noexcept(
-          false) {
-        throw format_error("zero padding invalid for pointers");
-    }
-    static constexpr basic_string_view<char> get_prefix(
-          std_format_spec_types::type_t,
-          bool) noexcept {
-        return {};
-    }
-};
-
 template <class Pointer, class CharT>
 struct pointer_formatter : public std_formatter_driver<CharT> {
     using base = std_formatter_driver<CharT>;
@@ -1899,8 +1872,7 @@ struct formatter_impl<const void*, CharT, true>
 // string formatters
 
 struct str_spec_delegate {
-    template <class CharT>
-    constexpr void set_defaults(std_format_spec<CharT>& spec) const noexcept {
+    constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         using namespace std_format_spec_types;
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::left;
@@ -1909,8 +1881,7 @@ struct str_spec_delegate {
             spec.type = type_t::s;
         }
     }
-    template <class CharT>
-    constexpr void verify(const std_format_spec<CharT>&) const {
+    constexpr void verify(const std_format_spec_base&) const {
         // TODO
     }
 };
@@ -1946,42 +1917,41 @@ struct str_spec_engine : str_default_engine<CharT, Traits> {
     }
 };
 
-template <class T>
-struct traits {
-    using type = std::char_traits<T>;
-};
-template <class T>
-struct traits<T*> {
-    using type = std::char_traits<std::remove_const_t<T>>;
-};
-template <class CharT, class Traits, class Alloc>
-struct traits<std::basic_string<CharT, Traits, Alloc>> {
-    using type = Traits;
-};
-template <class CharT, class Traits>
-struct traits<std::basic_string_view<CharT, Traits>> {
-    using type = Traits;
-};
-template <class T>
-using traits_t = typename traits<T>::type;
-
-template <class Str, class CharT>
-struct str_formatter : public std_formatter_driver<CharT> {
+template <class CharT>
+struct str_formatter_base : public std_formatter_driver<CharT> {
     using base = std_formatter_driver<CharT>;
+
+   protected:
     template <typename Out>
-    constexpr typename basic_format_context<Out, CharT>::iterator format(
-          std::decay_t<Str> i,
-          basic_format_context<Out, CharT>& fc) {
+    constexpr Out format_impl(basic_string_view<CharT> s,
+                              basic_format_context<Out, CharT>& fc) {
+        using Traits = typename basic_string_view<CharT>::traits_type;
         if (!base::spec) {
             fc.advance_to(
-                  str_default_engine<CharT, traits_t<Str>>{i}.write_value(
-                        fc.out()));
+                  str_default_engine<CharT, Traits>{s}.write_value(fc.out()));
             return fc.out();
         }
         base::finalize_spec(str_spec_delegate{});
-        fc.advance_to(base::format_to_spec(
-              fc, str_spec_engine<CharT, traits_t<Str>>{{i}}));
+        fc.advance_to(
+              base::format_to_spec(fc, str_spec_engine<CharT, Traits>{{s}}));
         return fc.out();
+    }
+};
+
+template <class T>
+struct is_string : std::false_type {};
+template <class CharT, class Traits, class Alloc>
+struct is_string<std::basic_string<CharT, Traits, Alloc>> : std::true_type {};
+
+template <class Str, class CharT>
+struct str_formatter : public str_formatter_base<CharT> {
+    using base = str_formatter_base<CharT>;
+    template <typename Out>
+    constexpr Out format(std::conditional_t<is_string<Str>::value,
+                                            const Str&,
+                                            std::decay_t<Str>> i,
+                         basic_format_context<Out, CharT>& fc) {
+        return base::format_impl(i, fc);
     }
 };
 
@@ -2074,15 +2044,6 @@ constexpr std::optional<replacement_field<CharT>> parse_replacement_field(
     return field;
 }
 
-template <class CharT>
-constexpr basic_string_view<CharT> lrbrace() noexcept {
-    if constexpr (std::is_same_v<CharT, char>) {
-        return "{}";
-    } else if constexpr (std::is_same_v<CharT, wchar_t>) {
-        return L"{}";
-    }
-}
-
 template <class CharT, class Callbacks>
 constexpr bool parse(range<CharT> fmt, Callbacks cb) {
     auto write_text = [&](range<CharT> text) {
@@ -2157,11 +2118,6 @@ constexpr void arg_out(Context& fc,
                 }},
           arg);
 }
-
-template <typename T, typename Ret = void>
-struct unreachable {
-    Ret operator()(const T&) const { LRSTD_UNREACHABLE(); }
-};
 
 template <class CharT, class Out>
 LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,

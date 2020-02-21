@@ -88,6 +88,8 @@ TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
 // on some versions of libc++ to_chars (that ship with xcode anyway), a
 // bunch of zeros are prepended to longs
 TEST_CASE("weird_to_chars_bug", "[formatters][!mayfail]") {
+    CHECK(lrstd::format("{}", 0x12345678) == "305419896");
+    CHECK(lrstd::format("{}", 0x12345678u) == "305419896");
     CHECK(lrstd::format("{}", 0x12345678l) == "305419896");
     CHECK(lrstd::format("{}", 0x12345678ul) == "305419896");
     CHECK(lrstd::format("{}", 0x12345678ll) == "305419896");
