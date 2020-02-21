@@ -613,8 +613,6 @@ struct overloaded : public F... {
 template <typename... F>
 overloaded(F...)->overloaded<F...>;
 
-namespace parse_utils {
-
 template <class CharT>
 struct range {
     using iterator = const CharT*;
@@ -783,8 +781,6 @@ constexpr typename range<CharT>::iterator find_balanced_delimiter_end(
     return it;
 }
 
-}  // namespace parse_utils
-
 struct arg_id_t {
     constexpr arg_id_t() noexcept = default;
     constexpr explicit arg_id_t(std::size_t val) noexcept : _id{val} {}
@@ -798,8 +794,6 @@ struct arg_id_t {
         return _id == static_cast<std::size_t>(-1);
     }
 };
-
-namespace std_format_spec_types {
 
 struct integer_or_arg_id {
     union {
@@ -853,13 +847,6 @@ inline constexpr bool is_defaulted(type_t t) noexcept {
     return t == type_t::defaulted;
 }
 
-}  // namespace std_format_spec_types
-
-namespace parse_std_format_spec {
-
-using namespace parse_utils;
-using namespace std_format_spec_types;
-
 struct std_format_spec_base {
     alignment_t align{alignment_t::defaulted};
     bool alternate = false;
@@ -874,92 +861,6 @@ struct std_format_spec : std_format_spec_base {
 };
 
 template <class CharT>
-constexpr std::optional<alignment_t> parse_align(range<CharT>& fmt) noexcept {
-    if (fmt.consume(static_cast<CharT>('<'))) {
-        return alignment_t::left;
-    }
-    if (fmt.consume(static_cast<CharT>('>'))) {
-        return alignment_t::right;
-    }
-    if (fmt.consume(static_cast<CharT>('^'))) {
-        return alignment_t::center;
-    }
-    return std::nullopt;
-}
-
-template <class CharT>
-constexpr std::optional<std::pair<CharT, alignment_t>> parse_fill_and_align(
-      range<CharT>& fmt) {
-    LRSTD_ASSERT(!fmt.empty());
-    if (fmt.match_nonempty(static_cast<CharT>('{')) ||
-        fmt.match_nonempty(static_cast<CharT>('}')))
-        return std::nullopt;
-    if (fmt.size() >= 2) {
-        auto next = fmt.substr(1);
-        if (const auto align = parse_align(next)) {
-            const CharT fill = fmt[0];
-            fmt = next;
-            return std::make_pair(fill, *align);
-        }
-    }
-    if (const auto align = parse_align(fmt)) {
-        return std::make_pair(' ', *align);
-    }
-    return std::nullopt;
-}
-
-template <class CharT>
-constexpr std::optional<sign_t> parse_sign(range<CharT>& fmt) {
-    if (fmt.consume(static_cast<CharT>('+')))
-        return sign_t::plus;
-    if (fmt.consume(static_cast<CharT>('-')))
-        return sign_t::minus;
-    if (fmt.consume(static_cast<CharT>(' ')))
-        return sign_t::space;
-    return std::nullopt;
-}
-
-template <bool AllowLeadingZero, class CharT>
-constexpr std::optional<integer_or_arg_id> parse_integer_or_arg_id(
-      range<CharT>& fmt,
-      basic_format_parse_context<CharT>& parse_context) {
-    if constexpr (!AllowLeadingZero) {
-        if (fmt.match(static_cast<CharT>('0')))
-            return std::nullopt;
-    }
-    if (fmt.match(static_cast<CharT>('{'))) {
-        auto next = fmt.substr(1);
-        if (const parse_integer_result result = parse_integer(next)) {
-            if (next.consume(static_cast<CharT>('}'))) {
-                fmt = next;
-                return arg_id_t{result.integer};
-            }
-        } else if (next.consume(static_cast<CharT>('}'))) {
-            fmt = next;
-            return arg_id_t{parse_context.next_arg_id()};
-        }
-    }
-    if (const parse_integer_result result = parse_integer(fmt)) {
-        return result.integer;
-    }
-    return std::nullopt;
-}
-
-template <class CharT>
-constexpr std::optional<integer_or_arg_id> parse_precision(
-      range<CharT>& fmt,
-      basic_format_parse_context<CharT>& parse_context) {
-    if (fmt.match(static_cast<CharT>('.'))) {
-        auto next = fmt.substr(1);
-        if (auto result = parse_integer_or_arg_id<true>(next, parse_context)) {
-            fmt = next;
-            return *result;
-        }
-    }
-    return std::nullopt;
-}
-
-template <class CharT>
 struct type_chars;
 template <>
 struct type_chars<char> {
@@ -971,46 +872,129 @@ struct type_chars<wchar_t> {
 };
 
 template <class CharT>
-constexpr std::optional<type_t> parse_type(range<CharT>& fmt) {
-    for (CharT c : type_chars<CharT>::value) {
-        if (fmt.consume(c)) {
-            return type_t(c);
+struct std_spec_parser {
+    constexpr std_spec_parser(basic_format_parse_context<CharT>& parse_context,
+                              std_format_spec<CharT>& spec) noexcept
+        : parse_context{parse_context}
+        , spec{spec}
+        , fmt{make_range(parse_context)} {}
+
+    basic_format_parse_context<CharT>& parse_context;
+    std_format_spec<CharT>& spec;
+    range<CharT> fmt;
+
+    constexpr void parse() {
+        parse_fill_and_align();
+        parse_sign();
+        if (fmt.consume(static_cast<CharT>('#'))) {
+            spec.alternate = true;
+        }
+        const bool width_leading_zero = fmt.consume(static_cast<CharT>('0'));
+        if (const auto width = parse_integer_or_arg_id<false>(fmt)) {
+            spec.width = width_t{*width, width_leading_zero};
+        }
+        parse_type();
+        parse_context.advance_to(fmt.begin());
+    }
+
+   private:
+    constexpr bool parse_align(range<CharT>& s) noexcept {
+        if (s.consume(static_cast<CharT>('<'))) {
+            spec.align = alignment_t::left;
+            return true;
+        }
+        if (s.consume(static_cast<CharT>('>'))) {
+            spec.align = alignment_t::right;
+            return true;
+        }
+        if (s.consume(static_cast<CharT>('^'))) {
+            spec.align = alignment_t::center;
+            return true;
+        }
+        return false;
+    }
+
+    constexpr void parse_fill_and_align() {
+        LRSTD_ASSERT(!fmt.empty());
+        if (fmt.match_nonempty('{') || fmt.match_nonempty('}'))
+            return;
+        if (fmt.size() >= 2) {
+            auto next = fmt.substr(1);
+            if (parse_align(next)) {
+                spec.fill = fmt[0];
+                fmt = next;
+                return;
+            }
+        }
+        if (parse_align(fmt)) {
+            spec.fill = ' ';
         }
     }
-    return std::nullopt;
-}
 
-template <class CharT>
-constexpr std_format_spec<CharT> parse(
-      basic_format_parse_context<CharT>& parse_context) {
-    std_format_spec<CharT> r;
+    constexpr void parse_sign() {
+        if (fmt.consume(static_cast<CharT>('+')))
+            spec.sign = sign_t::plus;
+        else if (fmt.consume(static_cast<CharT>('-')))
+            spec.sign = sign_t::minus;
+        else if (fmt.consume(static_cast<CharT>(' ')))
+            spec.sign = sign_t::space;
+    }
 
-    range<CharT> fmt(parse_context.begin(), parse_context.end());
+    constexpr std::optional<integer_or_arg_id> parse_integer_or_arg_id_impl(
+          range<CharT>& s) {
+        if (s.match('{')) {
+            auto next = s.substr(1);
+            if (const parse_integer_result result = parse_integer(next)) {
+                if (next.consume('}')) {
+                    s = next;
+                    return arg_id_t{result.integer};
+                }
+            } else if (next.consume('}')) {
+                s = next;
+                return arg_id_t{parse_context.next_arg_id()};
+            }
+        }
+        if (const parse_integer_result result = parse_integer(s)) {
+            return result.integer;
+        }
+        return std::nullopt;
+    }
 
-    LRSTD_ASSERT(!fmt.empty());
+    template <bool AllowLeadingZero>
+    constexpr std::optional<integer_or_arg_id> parse_integer_or_arg_id(
+          range<CharT>& s) {
+        if constexpr (!AllowLeadingZero) {
+            if (s.match('0'))
+                return std::nullopt;
+        }
+        return parse_integer_or_arg_id_impl(s);
+    }
 
-    if (const auto fill_and_align = parse_fill_and_align(fmt)) {
-        r.fill = fill_and_align->first;
-        r.align = fill_and_align->second;
+    constexpr void parse_precision() {
+        if (fmt.match('.')) {
+            auto next = fmt.substr(1);
+            if (auto result = parse_integer_or_arg_id<true>(next)) {
+                spec.precision = *result;
+                fmt = next;
+            }
+        }
     }
-    if (const auto sign = parse_sign(fmt)) {
-        r.sign = *sign;
-    }
-    if (fmt.consume(static_cast<CharT>('#'))) {
-        r.alternate = true;
-    }
-    const bool width_leading_zero = fmt.consume(static_cast<CharT>('0'));
-    if (const auto width = parse_integer_or_arg_id<false>(fmt, parse_context)) {
-        r.width = width_t{*width, width_leading_zero};
-    }
-    if (const auto type = parse_type(fmt)) {
-        r.type = *type;
-    }
-    parse_context.advance_to(fmt.begin());
-    return r;
-}
 
-}  // namespace parse_std_format_spec
+    constexpr void parse_type() {
+        for (CharT c : type_chars<CharT>::value) {
+            if (fmt.consume(c)) {
+                spec.type = type_t(c);
+            }
+        }
+    }
+
+    static constexpr range<CharT> make_range(
+          const basic_format_parse_context<CharT>& parse_context) noexcept {
+        range<CharT> fmt(parse_context.begin(), parse_context.end());
+        LRSTD_ASSERT(!fmt.empty());
+        return fmt;
+    }
+};
 
 struct single_char_writer {
     template <class CharT, class Out>
@@ -1120,9 +1104,10 @@ struct overlapping_str_writer : str_writer_common {
         return w;
     }
 };
-using overlapping_generic_writer = overloaded<overlapping_str_writer,
-                                              single_char_writer,
-                                              repeated_char_writer>;
+struct overlapping_generic_writer
+    : overloaded<overlapping_str_writer,
+                 single_char_writer,
+                 repeated_char_writer> {};
 
 struct nonoverlapping_str_writer : str_writer_common {
     using str_writer_common::operator();
@@ -1146,14 +1131,20 @@ struct nonoverlapping_str_writer : str_writer_common {
         return w;
     }
 };
-using nonoverlapping_generic_writer = overloaded<nonoverlapping_str_writer,
-                                                 single_char_writer,
-                                                 repeated_char_writer>;
+struct nonoverlapping_generic_writer
+    : overloaded<nonoverlapping_str_writer,
+                 single_char_writer,
+                 repeated_char_writer> {};
 
-namespace fst = std_format_spec_types;
-
-using parse_std_format_spec::std_format_spec;
-using parse_std_format_spec::std_format_spec_base;
+struct get_width_func {
+    std::size_t operator()(...) const noexcept(false) {
+        throw format_error("width argument must be an integral type");
+    }
+    template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
+    std::size_t operator()(Int i) const noexcept {
+        return i;
+    }
+};
 
 template <class CharT>
 struct std_formatter_driver {
@@ -1162,7 +1153,8 @@ struct std_formatter_driver {
     constexpr typename basic_format_parse_context<CharT>::iterator parse(
           basic_format_parse_context<CharT>& pc) {
         if (pc.begin() != pc.end()) {
-            spec = parse_std_format_spec::parse(pc);
+            spec.emplace();
+            std_spec_parser<CharT>{pc, *spec}.parse();
             if (pc.begin() != pc.end())
                 throw format_error("bad standard format spec string");
         }
@@ -1173,22 +1165,13 @@ struct std_formatter_driver {
     constexpr std::size_t get_width(
           const basic_format_context<Out, CharT>& fc) const {
         LRSTD_ASSERT(spec.has_value());
-        using I = parse_std_format_spec::integer_or_arg_id;
+        using I = integer_or_arg_id;
         switch (spec->width.i.tag) {
             case I::which::integer:
                 return spec->width.i.integer;
             case I::which::arg_id:
-                return visit_format_arg(
-                      [](auto arg) noexcept(std::is_integral_v<decltype(arg)>)
-                            ->std::size_t {
-                                if constexpr (std::is_integral_v<decltype(
-                                                    arg)>) {
-                                    return arg;
-                                } else {
-                                    throw format_error("width is not integral");
-                                }
-                            },
-                      fc.arg(spec->width.i.arg_id._id));
+                return visit_format_arg(get_width_func{},
+                                        fc.arg(spec->width.i.arg_id._id));
         }
     }
 
@@ -1214,7 +1197,7 @@ struct std_formatter_driver {
 };
 
 struct simple_padding_engine {
-    std_format_spec_types::alignment_t align;
+    alignment_t align;
 
     template <class CharT, class Out>
     Out write_left(std::size_t width,
@@ -1223,7 +1206,7 @@ struct simple_padding_engine {
                    Out out) const {
         if (value_width >= width)
             return out;
-        using A = std_format_spec_types::alignment_t;
+        using A = alignment_t;
         switch (align) {
             case A::left:
                 return out;
@@ -1244,7 +1227,7 @@ struct simple_padding_engine {
                     Out out) const {
         if (value_width >= width)
             return out;
-        using A = std_format_spec_types::alignment_t;
+        using A = alignment_t;
         switch (align) {
             case A::left:
                 return repeated_char_writer{}(fill, width - value_width, out);
@@ -1320,7 +1303,6 @@ struct char_default_engine {
 
 struct char_spec_delegate {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
-        using namespace std_format_spec_types;
         if (is_defaulted(spec.type)) {
             spec.type = type_t::c;
         }
@@ -1338,14 +1320,14 @@ template <class CharT>
 struct char_spec_engine : char_default_engine<CharT> {
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
-                                     std_format_spec_types::alignment_t align,
+                                     alignment_t align,
                                      CharT fill,
                                      Out out) const {
         return simple_padding_engine{align}.write_left(width, 1, fill, out);
     }
     template <class Out>
     constexpr Out write_right_padding(std::size_t width,
-                                      std_format_spec_types::alignment_t align,
+                                      alignment_t align,
                                       CharT fill,
                                       Out out) const {
         return simple_padding_engine{align}.write_right(width, 1, fill, out);
@@ -1364,7 +1346,6 @@ struct bool_default_engine {
 
 struct bool_spec_delegate {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
-        using namespace std_format_spec_types;
         if (is_defaulted(spec.type)) {
             spec.type = type_t::s;
         }
@@ -1382,7 +1363,7 @@ template <class CharT>
 struct bool_spec_engine : bool_default_engine {
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
-                                     std_format_spec_types::alignment_t align,
+                                     alignment_t align,
                                      CharT fill,
                                      Out out) const {
         return simple_padding_engine{align}.write_left(width, value_width(),
@@ -1390,7 +1371,7 @@ struct bool_spec_engine : bool_default_engine {
     }
     template <class Out>
     constexpr Out write_right_padding(std::size_t width,
-                                      std_format_spec_types::alignment_t align,
+                                      alignment_t align,
                                       CharT fill,
                                       Out out) const {
         return simple_padding_engine{align}.write_right(width, value_width(),
@@ -1419,9 +1400,8 @@ struct integer_default_engine {
 };
 
 struct integer_spec_engine_common {
-    static constexpr char get_sign_char(std_format_spec_types::sign_t sign,
-                                        bool negative) noexcept {
-        using S = std_format_spec_types::sign_t;
+    static constexpr char get_sign_char(sign_t sign, bool negative) noexcept {
+        using S = sign_t;
         switch (sign) {
             case S::plus:
                 return negative ? '-' : '+';
@@ -1434,11 +1414,11 @@ struct integer_spec_engine_common {
     }
 
     static constexpr basic_string_view<char> get_prefix(
-          std_format_spec_types::type_t type,
+          type_t type,
           bool alternate) noexcept {
         if (!alternate)
             return {};
-        using T = std_format_spec_types::type_t;
+        using T = type_t;
         switch (type) {
             case T::x:
                 return "0x";
@@ -1463,8 +1443,8 @@ struct integer_spec_engine_common {
         }
         LRSTD_UNREACHABLE();
     }
-    static constexpr int get_base(std_format_spec_types::type_t type) noexcept {
-        using T = std_format_spec_types::type_t;
+    static constexpr int get_base(type_t type) noexcept {
+        using T = type_t;
         switch (type) {
             case T::d:
                 return 10;
@@ -1511,7 +1491,7 @@ struct integer_spec_engine_base : integer_spec_engine_common {
                                     this->i, get_base(spec.type));
         buf_ptr = buf.data() + (i < 0);
         buf_size = result.ptr - buf_ptr;
-        if (spec.type == fst::type_t::X) {
+        if (spec.type == type_t::X) {
             std::transform(buf_ptr, buf_ptr + buf_size, buf_ptr,
                            [](char c) { return std::toupper(c); });
         }
@@ -1520,7 +1500,6 @@ struct integer_spec_engine_base : integer_spec_engine_common {
 
 struct integer_spec_delegate {
     constexpr void set_defaults(std_format_spec_base& spec) noexcept {
-        using namespace std_format_spec_types;
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::right;
         } else {
@@ -1543,7 +1522,7 @@ struct integer_simple_spec_engine : integer_spec_engine_base<Int> {
 
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
-                                     std_format_spec_types::alignment_t align,
+                                     alignment_t align,
                                      CharT fill,
                                      Out out) const {
         return simple_padding_engine{align}.write_left(
@@ -1553,7 +1532,7 @@ struct integer_simple_spec_engine : integer_spec_engine_base<Int> {
     }
     template <class Out>
     constexpr Out write_right_padding(std::size_t width,
-                                      std_format_spec_types::alignment_t align,
+                                      alignment_t align,
                                       CharT fill,
                                       Out out) const {
         return simple_padding_engine{align}.write_right(
@@ -1579,7 +1558,7 @@ struct integer_zero_pad_spec_engine : integer_spec_engine_base<Int> {
 
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
-                                     std_format_spec_types::alignment_t,
+                                     alignment_t,
                                      CharT,
                                      Out out) const {
         return zero_padding_engine{}.write_left(
@@ -1587,7 +1566,7 @@ struct integer_zero_pad_spec_engine : integer_spec_engine_base<Int> {
     }
     template <class Out>
     constexpr Out write_right_padding(std::size_t,
-                                      std_format_spec_types::alignment_t,
+                                      alignment_t,
                                       CharT,
                                       Out out) const {
         return out;
@@ -1626,7 +1605,7 @@ struct int_formatter_base : public std_formatter_driver<CharT> {
     constexpr Out format_impl(Int i, basic_format_context<Out, CharT>& fc) {
         base::finalize_spec(SpecDelegate{});
 
-        using T = std_format_spec_types::type_t;
+        using T = type_t;
         switch (base::spec->type) {
             case T::c:
                 if (!representable_as_char<CharT>(i)) {
@@ -1786,7 +1765,6 @@ struct formatter_impl<long double, CharT, true>
 
 struct ptr_spec_delegate {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
-        using namespace std_format_spec_types;
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::left;
         }
@@ -1795,7 +1773,6 @@ struct ptr_spec_delegate {
         }
     }
     constexpr void verify(const std_format_spec_base& spec) const {
-        using namespace std_format_spec_types;
         if (spec.type != type_t::p)
             throw format_error("invalid format type for pointer");
         // TODO
@@ -1826,7 +1803,7 @@ struct ptr_default_engine {
 struct ptr_spec_engine : ptr_default_engine {
     template <class Out, class CharT>
     constexpr Out write_left_padding(std::size_t width,
-                                     std_format_spec_types::alignment_t align,
+                                     alignment_t align,
                                      CharT fill,
                                      Out out) const {
         return simple_padding_engine{align}.write_left(width, buf_size, fill,
@@ -1834,7 +1811,7 @@ struct ptr_spec_engine : ptr_default_engine {
     }
     template <class Out, class CharT>
     constexpr Out write_right_padding(std::size_t width,
-                                      std_format_spec_types::alignment_t align,
+                                      alignment_t align,
                                       CharT fill,
                                       Out out) const {
         return simple_padding_engine{align}.write_right(width, buf_size, fill,
@@ -1873,7 +1850,6 @@ struct formatter_impl<const void*, CharT, true>
 
 struct str_spec_delegate {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
-        using namespace std_format_spec_types;
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::left;
         }
@@ -1901,7 +1877,7 @@ struct str_spec_engine : str_default_engine<CharT, Traits> {
 
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
-                                     std_format_spec_types::alignment_t align,
+                                     alignment_t align,
                                      CharT fill,
                                      Out out) const {
         return simple_padding_engine{align}.write_left(width, base::str.size(),
@@ -1909,7 +1885,7 @@ struct str_spec_engine : str_default_engine<CharT, Traits> {
     }
     template <class Out>
     constexpr Out write_right_padding(std::size_t width,
-                                      std_format_spec_types::alignment_t align,
+                                      alignment_t align,
                                       CharT fill,
                                       Out out) const {
         return simple_padding_engine{align}.write_right(width, base::str.size(),
@@ -1979,8 +1955,6 @@ struct formatter : public detail::formatter_impl<T, Char> {};
 namespace detail {
 
 namespace parse_fmt_str {
-
-using namespace parse_utils;
 
 template <class CharT>
 struct text {
@@ -2128,10 +2102,10 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
                                                     context.args_size());
 
     namespace p = parse_fmt_str;
-    p::range<CharT> fmt(fmt_sv);
+    range<CharT> fmt(fmt_sv);
 
     struct Callbacks {
-        constexpr void text(p::range<CharT> range) const {
+        constexpr void text(range<CharT> range) const {
             context.advance_to(overlapping_str_writer{}(range.as_string_view(),
                                                         context.out()));
         }
