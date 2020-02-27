@@ -615,6 +615,7 @@ overloaded(F...)->overloaded<F...>;
 
 template <class CharT>
 struct range {
+    using char_type = CharT;
     using iterator = const CharT*;
     using const_iterator = const CharT*;
     using size_type = std::size_t;
@@ -768,8 +769,8 @@ inline parse_integer_result parse_integer(range<wchar_t>& fmt) {
 template <class CharT>
 constexpr typename range<CharT>::iterator find_balanced_delimiter_end(
       range<CharT> fmt,
-      CharT start,
-      CharT end,
+      typename range<CharT>::char_type start,
+      typename range<CharT>::char_type end,
       std::size_t start_count = 1) {
     auto it = fmt.begin();
     for (; it != fmt.end(); ++it) {
@@ -886,10 +887,10 @@ struct std_spec_parser {
     constexpr void parse() {
         parse_fill_and_align();
         parse_sign();
-        if (fmt.consume(static_cast<CharT>('#'))) {
+        if (fmt.consume('#')) {
             spec.alternate = true;
         }
-        const bool width_leading_zero = fmt.consume(static_cast<CharT>('0'));
+        const bool width_leading_zero = fmt.consume('0');
         if (const auto width = parse_integer_or_arg_id<false>(fmt)) {
             spec.width = width_t{*width, width_leading_zero};
         }
@@ -899,15 +900,15 @@ struct std_spec_parser {
 
    private:
     constexpr bool parse_align(range<CharT>& s) noexcept {
-        if (s.consume(static_cast<CharT>('<'))) {
+        if (s.consume('<')) {
             spec.align = alignment_t::left;
             return true;
         }
-        if (s.consume(static_cast<CharT>('>'))) {
+        if (s.consume('>')) {
             spec.align = alignment_t::right;
             return true;
         }
-        if (s.consume(static_cast<CharT>('^'))) {
+        if (s.consume('^')) {
             spec.align = alignment_t::center;
             return true;
         }
@@ -932,11 +933,11 @@ struct std_spec_parser {
     }
 
     constexpr void parse_sign() {
-        if (fmt.consume(static_cast<CharT>('+')))
+        if (fmt.consume('+'))
             spec.sign = sign_t::plus;
-        else if (fmt.consume(static_cast<CharT>('-')))
+        else if (fmt.consume('-'))
             spec.sign = sign_t::minus;
-        else if (fmt.consume(static_cast<CharT>(' ')))
+        else if (fmt.consume(' '))
             spec.sign = sign_t::space;
     }
 
@@ -1954,143 +1955,131 @@ struct formatter : public detail::formatter_impl<T, Char> {};
 
 namespace detail {
 
-namespace parse_fmt_str {
-
-template <class CharT>
-struct text {
-    range<CharT> text;
-};
-
 template <class CharT>
 struct replacement_field {
     range<CharT> format_spec;
     arg_id_t arg_id;
 };
 
-enum class result_type : char { end, error, text, replacement_field };
 template <class CharT>
-struct result {
-    union {
-        std::monostate _;
-        text<CharT> txt;
-        replacement_field<CharT> repl;
-    };
-    result_type tag;
-    constexpr result(result_type type) noexcept : _{}, tag{type} {}
-    constexpr result(text<CharT> t) noexcept : txt{t}, tag{result_type::text} {}
-    constexpr result(replacement_field<CharT> r) noexcept
-        : repl{r}, tag{result_type::replacement_field} {}
-};
+struct fmt_str_parser {
+    range<CharT> fmt;
 
-template <class CharT>
-constexpr parse_integer_result parse_arg_id(range<CharT>& fmt) {
-    if (fmt.consume(static_cast<CharT>('0')))
-        return 0;
-    return parse_integer(fmt);
-}
-
-template <class CharT>
-constexpr std::optional<replacement_field<CharT>> get_replacement_field(
-      parse_integer_result i) {
-    using Tag = parse_integer_result::type;
-    switch (i.tag) {
-        case Tag::error:
-            return std::nullopt;
-        case Tag::none:
-            return replacement_field<CharT>{{}, arg_id_t::auto_id()};
-        case Tag::success:
-            return replacement_field<CharT>{{}, arg_id_t{i.integer}};
-    }
-}
-
-template <class CharT>
-constexpr std::optional<replacement_field<CharT>> parse_replacement_field(
-      range<CharT>& fmt) {
-    auto field = get_replacement_field<CharT>(parse_arg_id(fmt));
-    if (!field)
-        return std::nullopt;
-    if (fmt.consume(static_cast<CharT>(':'))) {
-        auto format_spec_end = find_balanced_delimiter_end(
-              fmt, static_cast<CharT>('{'), static_cast<CharT>('}'));
-        field->format_spec = range<CharT>(fmt.begin(), format_spec_end);
-        fmt.advance_to(format_spec_end);
-    }
-    return field;
-}
-
-template <class CharT, class Callbacks>
-constexpr bool parse(range<CharT> fmt, Callbacks cb) {
-    auto write_text = [&](range<CharT> text) {
-        while (!text.empty()) {
-            auto rbrace_it = text.find('}');
-            if (rbrace_it == text.end()) {
-                cb.text(text);
-                break;
+    template <class Callbacks>
+    constexpr bool parse(Callbacks cb) {
+        auto write_text = [&](range<CharT> text) {
+            while (!text.empty()) {
+                auto rbrace_it = text.find('}');
+                if (rbrace_it == text.end()) {
+                    cb.text(text);
+                    break;
+                }
+                ++rbrace_it;
+                if (rbrace_it == text.end() || *rbrace_it != '}')
+                    return false;
+                cb.text(range<CharT>{text.begin(), rbrace_it});
+                text.advance_to(rbrace_it + 1);
             }
-            ++rbrace_it;
-            if (rbrace_it == text.end() || *rbrace_it != '}')
+            return true;
+        };
+
+        while (!fmt.empty()) {
+            const auto lbrace_it = fmt.find('{');
+            if (lbrace_it == fmt.end()) {
+                return write_text(fmt);
+            }
+            auto next = lbrace_it + 1;
+            if (next == fmt.end())
                 return false;
-            cb.text(range<CharT>{text.begin(), rbrace_it});
-            text.advance_to(rbrace_it + 1);
+            if (*next == '{') {
+                write_text(range<CharT>{fmt.begin(), next});
+                fmt.advance_to(next + 1);
+            } else {
+                write_text(range<CharT>{fmt.begin(), lbrace_it});
+                fmt.advance_to(next);
+                if (!parse_replacement_field(cb))
+                    return false;
+            }
         }
         return true;
-    };
+    }
 
-    while (!fmt.empty()) {
-        const auto lbrace_it = fmt.find('{');
-        if (lbrace_it == fmt.end()) {
-            return write_text(fmt);
-        }
-        auto next = lbrace_it + 1;
-        if (next == fmt.end())
-            return false;
-        if (*next == '{') {
-            write_text(range<CharT>{fmt.begin(), next});
-            fmt.advance_to(next + 1);
-        } else if (*next == '}') {
-            write_text(range<CharT>{fmt.begin(), lbrace_it});
-            fmt.advance_to(next + 1);
+   private:
+    constexpr parse_integer_result parse_arg_id() {
+        if (fmt.consume('0'))
+            return 0;
+        return parse_integer(fmt);
+    }
+
+    template <class Callbacks>
+    constexpr bool parse_replacement_field(Callbacks cb) {
+        if (fmt.consume('}')) {
             cb.replacement_field(
                   replacement_field<CharT>{{}, arg_id_t::auto_id()});
-        } else {
-            write_text(range<CharT>{fmt.begin(), lbrace_it});
-            fmt.advance_to(next);
-            const auto result = parse_replacement_field(fmt);
-            if (!result || !fmt.consume(static_cast<CharT>('}')))
-                return false;
-            cb.replacement_field(*result);
+            return true;
         }
+        const parse_integer_result arg_value = parse_arg_id();
+        if (arg_value.tag == parse_integer_result::type::error)
+            return false;
+        const arg_id_t arg_id =
+              arg_value.tag == parse_integer_result::type::none
+                    ? arg_id_t::auto_id()
+                    : arg_id_t{arg_value.integer};
+        if (fmt.consume(':')) {
+            auto format_spec_end = find_balanced_delimiter_end(fmt, '{', '}');
+            range<CharT> format_spec(fmt.begin(), format_spec_end);
+            cb.replacement_field(replacement_field<CharT>{format_spec, arg_id});
+            fmt.advance_to(format_spec_end);
+        } else
+            cb.replacement_field(replacement_field<CharT>{{}, arg_id});
+        return fmt.consume('}');
     }
-    return true;
-}
+};
 
-}  // namespace parse_fmt_str
-
-template <typename T, typename Ret = void>
 struct throw_uninitialized_format_arg {
-    Ret operator()(const T&) const {
+    void operator()(std::monostate) const {
         throw format_error("uninitialized format argument");
     }
 };
 
 template <class Context, class CharT>
+struct arg_out_func : throw_uninitialized_format_arg {
+    using throw_uninitialized_format_arg::operator();
+
+    template <class Arg>
+    constexpr void impl(Arg val) const {
+        typename Context::template formatter_type<Arg> f;
+        pc.advance_to(f.parse(pc));
+        fc.advance_to(f.format(val, fc));
+    }
+    template <class Arg>
+    constexpr void operator()(Arg arg) const {
+        impl(arg);
+    }
+    constexpr void operator()(int i) const {
+        return impl(static_cast<long long>(i));
+    }
+    constexpr void operator()(unsigned int ui) const {
+        return impl(static_cast<unsigned long long>(ui));
+    }
+    constexpr void operator()(const CharT* cptr) const {
+        return impl(basic_string_view<CharT>(cptr));
+    }
+
+    constexpr void operator()(
+          const typename basic_format_arg<Context>::handle handle) const {
+        handle.format(pc, fc);
+    }
+
+    Context& fc;
+    basic_format_parse_context<CharT>& pc;
+};
+
+template <class Context, class CharT>
 constexpr void arg_out(Context& fc,
                        basic_format_parse_context<CharT>& pc,
-                       const basic_format_arg<Context>& arg) {
-    visit_format_arg(
-          overloaded{
-                throw_uninitialized_format_arg<std::monostate>{},
-                [&](const typename basic_format_arg<Context>::handle handle) {
-                    handle.format(pc, fc);
-                },
-                [&](const auto val) {
-                    using T = std::remove_cv_t<
-                          std::remove_reference_t<decltype(val)>>;
-                    typename Context::template formatter_type<T> f;
-                    pc.advance_to(f.parse(pc));
-                    fc.advance_to(f.format(val, fc));
-                }},
-          arg);
+                       const basic_format_arg<Context> arg) {
+    visit_format_arg(arg_out_func<Context, CharT>{{}, fc, pc}, arg);
 }
 
 template <class CharT, class Out>
@@ -2101,7 +2090,6 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
     basic_format_parse_context<CharT> parse_context(fmt_sv,
                                                     context.args_size());
 
-    namespace p = parse_fmt_str;
     range<CharT> fmt(fmt_sv);
 
     struct Callbacks {
@@ -2109,8 +2097,7 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
             context.advance_to(overlapping_str_writer{}(range.as_string_view(),
                                                         context.out()));
         }
-        constexpr void replacement_field(
-              p::replacement_field<CharT> field) const {
+        constexpr void replacement_field(replacement_field<CharT> field) const {
             parse_context._begin = field.format_spec.begin();
             parse_context._end = field.format_spec.end();
             arg_out(context, parse_context,
@@ -2123,7 +2110,8 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
         basic_format_context<Out, CharT>& context;
         basic_format_parse_context<CharT>& parse_context;
     };
-    if (!p::parse(fmt, Callbacks{context, parse_context})) {
+    if (!fmt_str_parser<CharT>{{fmt}}.parse(
+              Callbacks{context, parse_context})) {
         throw format_error("invalid format string");
     }
     return context.out();
