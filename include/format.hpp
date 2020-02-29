@@ -1178,6 +1178,7 @@ struct std_formatter_driver {
                 return visit_format_arg(get_width_func{},
                                         fc.arg(spec->width.i.arg_id._id));
         }
+        LRSTD_UNREACHABLE();
     }
 
     template <class SpecDelegate>
@@ -1586,9 +1587,10 @@ struct integer_zero_pad_spec_engine : integer_spec_engine_base<Int> {
 template <class Char, class Int>
 constexpr bool representable_as_char(Int i) noexcept {
     if constexpr (sizeof(Int) <= sizeof(Char)) {
-        if constexpr (std::is_signed_v<Int> == std::is_signed_v<Char>)
+        if constexpr (std::is_signed_v<Int> == std::is_signed_v<Char>) {
+            (void)i;
             return true;
-        else if constexpr (std::is_signed_v<Int> && !std::is_signed_v<Char>) {
+        } else if constexpr (std::is_signed_v<Int> && !std::is_signed_v<Char>) {
             return 0 <= i;
         } else {
             return i <= static_cast<Int>(std::numeric_limits<Char>::max());

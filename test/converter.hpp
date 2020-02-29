@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstring>
 #include <forward_list>
 #include <string>
 
