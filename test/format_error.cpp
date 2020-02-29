@@ -2,6 +2,7 @@
 
 #include <catch.hpp>
 
+#include <cstring>
 #include <string>
 
 TEST_CASE("format_error", "") {

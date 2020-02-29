@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <forward_list>
 #include <string>
 
