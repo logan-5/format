@@ -1023,9 +1023,9 @@ struct single_char_writer {
     template <class CharT, class It>
     constexpr write_n_wrapper<It> operator()(CharT c,
                                              write_n_wrapper<It> w) const
-          noexcept(noexcept(this->operator()(c, w.it))) {
+          noexcept(noexcept((*this)(c, w.it))) {
         if (w.current < w.n) {
-            w.it = this->operator()(c, w.it);
+            w.it = (*this)(c, w.it);
             ++w.current;
             return w;
         }
@@ -1060,9 +1060,9 @@ struct repeated_char_writer {
     constexpr write_n_wrapper<It> operator()(CharT c,
                                              std::size_t count,
                                              write_n_wrapper<It> w) const
-          noexcept(noexcept(this->operator()(c, count, w.it))) {
+          noexcept(noexcept((*this)(c, count, w.it))) {
         const auto to_write = std::min<std::size_t>(count, w.n - w.current);
-        w.it = this->operator()(c, to_write, w.it);
+        w.it = (*this)(c, to_write, w.it);
         w.current += to_write;
         if (count > to_write) {
             w.overflow += count - to_write;
@@ -1100,10 +1100,9 @@ struct overlapping_str_writer : str_writer_common {
     template <class CharT, class Traits, class It>
     constexpr write_n_wrapper<It> operator()(
           std::basic_string_view<CharT, Traits> str,
-          write_n_wrapper<It> w) const
-          noexcept(noexcept(this->operator()(str, w.it))) {
+          write_n_wrapper<It> w) const noexcept(noexcept((*this)(str, w.it))) {
         auto truncated_str = str.substr(0, w.n - w.current);
-        w.it = this->operator()(truncated_str, w.it);
+        w.it = (*this)(truncated_str, w.it);
         w.current += truncated_str.size();
         w.overflow += str.size() - truncated_str.size();
         return w;
@@ -1127,10 +1126,9 @@ struct nonoverlapping_str_writer : str_writer_common {
     template <class CharT, class Traits, class It>
     constexpr write_n_wrapper<It> operator()(
           std::basic_string_view<CharT, Traits> str,
-          write_n_wrapper<It> w) const
-          noexcept(noexcept(this->operator()(str, w.it))) {
+          write_n_wrapper<It> w) const noexcept(noexcept((*this)(str, w.it))) {
         auto truncated_str = str.substr(0, w.n - w.current);
-        w.it = this->operator()(truncated_str, w.it);
+        w.it = (*this)(truncated_str, w.it);
         w.current += truncated_str.size();
         w.overflow += str.size() - truncated_str.size();
         return w;
