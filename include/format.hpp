@@ -1,10 +1,12 @@
 #ifndef LRSTD_FORMAT_HPP
 #define LRSTD_FORMAT_HPP
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <charconv>
 #include <cstring>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -1011,7 +1013,7 @@ struct single_char_writer {
           noexcept(noexcept(Traits::assign(*out++, c))) {
         Traits::assign(*out++, c);
         return out;
-    };
+    }
     template <class CharT>
     constexpr char_counter operator()(CharT, char_counter counter) const
           noexcept {
