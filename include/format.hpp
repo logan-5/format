@@ -297,6 +297,11 @@ struct write_n_wrapper {
     It it;
     iter_difference_t<It> current = 0;
     iter_difference_t<It> overflow = 0;
+
+    std::size_t remaining() const noexcept {
+        LRSTD_ASSERT(n >= current);
+        return static_cast<std::size_t>(n - current);
+    }
 };
 
 }  // namespace detail
@@ -632,7 +637,9 @@ struct range {
         : _begin{sv.data()}, _end{sv.data() + sv.size()} {}
 
     constexpr bool empty() const noexcept { return _begin == _end; }
-    constexpr size_type size() const noexcept { return _end - _begin; }
+    constexpr size_type size() const noexcept {
+        return static_cast<std::size_t>(_end - _begin);
+    }
     constexpr iterator begin() const noexcept { return _begin; }
     constexpr iterator end() const noexcept { return _end; }
     constexpr auto rbegin() const noexcept {
@@ -670,7 +677,8 @@ struct range {
 #endif
 
     constexpr basic_string_view<CharT> as_string_view() const noexcept {
-        return basic_string_view<CharT>(_begin, _end - _begin);
+        return basic_string_view<CharT>(
+              _begin, static_cast<std::size_t>(_end - _begin));
     }
     explicit operator basic_string_view<CharT>() const noexcept {
         return as_string_view();
@@ -763,7 +771,7 @@ inline parse_integer_result parse_integer(range<wchar_t>& fmt) {
     std::size_t ret = 0;
     for (auto dig_it = std::make_reverse_iterator(it); dig_it != fmt.rend();
          ++dig_it) {
-        ret += (*dig_it - L'0') * place_value;
+        ret += static_cast<std::size_t>(*dig_it - L'0') * place_value;
         place_value *= 10;
     }
     fmt.advance_to(it);
@@ -1061,7 +1069,7 @@ struct repeated_char_writer {
                                              std::size_t count,
                                              write_n_wrapper<It> w) const
           noexcept(noexcept((*this)(c, count, w.it))) {
-        const auto to_write = std::min<std::size_t>(count, w.n - w.current);
+        const auto to_write = std::min(count, w.remaining());
         w.it = (*this)(c, to_write, w.it);
         w.current += to_write;
         if (count > to_write) {
@@ -1101,7 +1109,7 @@ struct overlapping_str_writer : str_writer_common {
     constexpr write_n_wrapper<It> operator()(
           std::basic_string_view<CharT, Traits> str,
           write_n_wrapper<It> w) const noexcept(noexcept((*this)(str, w.it))) {
-        auto truncated_str = str.substr(0, w.n - w.current);
+        auto truncated_str = str.substr(0, w.remaining());
         w.it = (*this)(truncated_str, w.it);
         w.current += truncated_str.size();
         w.overflow += str.size() - truncated_str.size();
@@ -1127,7 +1135,7 @@ struct nonoverlapping_str_writer : str_writer_common {
     constexpr write_n_wrapper<It> operator()(
           std::basic_string_view<CharT, Traits> str,
           write_n_wrapper<It> w) const noexcept(noexcept((*this)(str, w.it))) {
-        auto truncated_str = str.substr(0, w.n - w.current);
+        auto truncated_str = str.substr(0, w.remaining());
         w.it = (*this)(truncated_str, w.it);
         w.current += truncated_str.size();
         w.overflow += str.size() - truncated_str.size();
@@ -1144,8 +1152,13 @@ struct get_width_func {
         throw format_error("width argument must be an integral type");
     }
     template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
-    std::size_t operator()(Int i) const noexcept {
-        return i;
+    std::size_t operator()(Int i) const noexcept(false) {
+        if constexpr (std::is_signed_v<Int>) {
+            if (i < 0) {
+                throw format_error("invalid width");
+            }
+        }
+        return static_cast<std::size_t>(i);
     }
 };
 
@@ -1399,7 +1412,9 @@ struct integer_default_engine {
         temp_stack_buffer<Int> buf;
         auto result = std::to_chars(buf.data(), buf.data() + buf.size(), i, 10);
         return nonoverlapping_str_writer{}(
-              std::string_view(buf.data(), result.ptr - buf.data()), out);
+              std::string_view(buf.data(), static_cast<std::size_t>(
+                                                 result.ptr - buf.data())),
+              out);
     }
 };
 
@@ -1494,7 +1509,7 @@ struct integer_spec_engine_base : integer_spec_engine_common {
         auto result = std::to_chars(buf.data(), buf.data() + buf.size(),
                                     this->i, get_base(spec.type));
         buf_ptr = buf.data() + (i < 0);
-        buf_size = result.ptr - buf_ptr;
+        buf_size = static_cast<std::size_t>(result.ptr - buf_ptr);
         if (spec.type == type_t::X) {
             std::transform(buf_ptr, buf_ptr + buf_size, buf_ptr,
                            [](char c) { return std::toupper(c); });
@@ -1795,7 +1810,7 @@ struct ptr_default_engine {
         const auto result =
               std::to_chars(buf.data() + 2, buf.data() + buf.size(),
                             reinterpret_cast<std::uintptr_t>(ptr), 16);
-        buf_size = result.ptr - buf.data();
+        buf_size = static_cast<std::size_t>(result.ptr - buf.data());
     }
 
     template <class Out>

@@ -27,7 +27,7 @@ set(source_files
     std_examples.cpp 
     test.cpp
 )
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wextra -pedantic -Wno-missing-field-initializers")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wextra -pedantic -Wno-missing-field-initializers -Wconversion")
 add_executable(format_test ${source_files})
 target_link_libraries(format_test PUBLIC format)
 target_include_directories(format_test PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
