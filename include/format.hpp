@@ -825,6 +825,31 @@ struct integer_or_arg_id {
         : integer{i}, tag{which::integer} {}
     constexpr integer_or_arg_id(arg_id_t arg)
         : arg_id{arg}, tag{which::arg_id} {}
+
+    template <class Out, class CharT>
+    void get_integer(basic_format_context<Out, CharT>& context) {
+        if (tag == which::arg_id) {
+            integer = visit_format_arg(get_integer_func{},
+                                       context.arg(this->arg_id._id));
+            tag = which::integer;
+        }
+    }
+
+   private:
+    struct get_integer_func {
+        std::size_t operator()(...) const noexcept(false) {
+            throw_format_error("argument must be an integral type");
+        }
+        template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
+        std::size_t operator()(Int i) const noexcept(false) {
+            if constexpr (std::is_signed_v<Int>) {
+                if (i < 0) {
+                    throw_format_error("invalid argument");
+                }
+            }
+            return static_cast<std::size_t>(i);
+        }
+    };
 };
 
 enum class alignment_t : char {
@@ -875,8 +900,13 @@ struct std_format_spec_base {
     sign_t sign;
     bool zero_pad;
     integer_or_arg_id width;
-    integer_or_arg_id precision;
+    integer_or_arg_id precision{std::numeric_limits<std::size_t>::max()};
     type_t type{type_t::defaulted};
+
+    constexpr bool has_precision() const noexcept {
+        return !(precision.tag == integer_or_arg_id::which::integer &&
+                 precision.integer == std::numeric_limits<std::size_t>::max());
+    }
 };
 template <class CharT>
 struct std_format_spec : std_format_spec_base {
@@ -905,6 +935,7 @@ struct std_spec_parser {
         if (const auto width = parse_integer_or_arg_id<false>(fmt)) {
             spec.width = *width;
         }
+        parse_precision();
         parse_type();
         parse_context.advance_to(fmt.begin());
     }
@@ -1156,21 +1187,6 @@ struct nonoverlapping_generic_writer
                  single_char_writer,
                  repeated_char_writer> {};
 
-struct get_width_func {
-    std::size_t operator()(...) const noexcept(false) {
-        throw_format_error("width argument must be an integral type");
-    }
-    template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
-    std::size_t operator()(Int i) const noexcept(false) {
-        if constexpr (std::is_signed_v<Int>) {
-            if (i < 0) {
-                throw_format_error("invalid width");
-            }
-        }
-        return static_cast<std::size_t>(i);
-    }
-};
-
 template <class CharT>
 struct std_formatter_driver {
     std::optional<std_format_spec<CharT>> spec;
@@ -1186,26 +1202,17 @@ struct std_formatter_driver {
         return pc.begin();
     }
 
-    template <class Out>
-    constexpr std::size_t get_width(
-          const basic_format_context<Out, CharT>& fc) const {
-        LRSTD_ASSERT(spec.has_value());
-        using I = integer_or_arg_id;
-        switch (spec->width.tag) {
-            case I::which::integer:
-                return spec->width.integer;
-            case I::which::arg_id:
-                return visit_format_arg(get_width_func{},
-                                        fc.arg(spec->width.arg_id._id));
-        }
-        LRSTD_UNREACHABLE();
-    }
-
     template <class SpecDelegate>
-    constexpr void finalize_spec(SpecDelegate&& spec_delegate) {
-        LRSTD_ASSERT(spec.has_value());
+    constexpr void finalize_spec_impl(SpecDelegate&& spec_delegate) {
         spec_delegate.set_defaults(*spec);
         spec_delegate.verify(*spec);
+    }
+    template <class Context, class SpecDelegate>
+    constexpr void finalize_spec(Context& fc, SpecDelegate&& spec_delegate) {
+        LRSTD_ASSERT(spec.has_value());
+        spec->width.get_integer(fc);
+        spec->precision.get_integer(fc);
+        finalize_spec_impl(std::forward<SpecDelegate>(spec_delegate));
     }
 
     template <class Out, class FormatEngine>
@@ -1213,10 +1220,12 @@ struct std_formatter_driver {
                                  FormatEngine&& engine) {
         LRSTD_ASSERT(spec.has_value());
         Out out = fc.out();
-        const std::size_t width = get_width(fc);
-        out = engine.write_left_padding(width, spec->align, spec->fill, out);
+        spec->width.get_integer(fc);
+        out = engine.write_left_padding(spec->width.integer, spec->align,
+                                        spec->fill, out);
         out = engine.write_value(out);
-        out = engine.write_right_padding(width, spec->align, spec->fill, out);
+        out = engine.write_right_padding(spec->width.integer, spec->align,
+                                         spec->fill, out);
         fc.advance_to(out);
         return out;
     }
@@ -1661,7 +1670,7 @@ struct int_formatter_base : public std_formatter_driver<CharT> {
    protected:
     template <class Int, typename Out>
     constexpr Out format_impl(Int i, basic_format_context<Out, CharT>& fc) {
-        base::finalize_spec(SpecDelegate{});
+        base::finalize_spec(fc, SpecDelegate{});
 
         using T = type_t;
         switch (base::spec->type) {
@@ -1888,7 +1897,7 @@ struct pointer_formatter : public std_formatter_driver<CharT> {
             fc.advance_to(ptr_default_engine{p}.write_value(fc.out()));
             return fc.out();
         }
-        base::finalize_spec(ptr_spec_delegate{});
+        base::finalize_spec(fc, ptr_spec_delegate{});
         fc.advance_to(base::format_to_spec(fc, ptr_spec_engine{{p}}));
         return fc.out();
     }
@@ -1935,6 +1944,12 @@ template <class CharT, class Traits>
 struct str_spec_engine : str_default_engine<CharT, Traits> {
     using base = str_default_engine<CharT, Traits>;
 
+    constexpr str_spec_engine(std::basic_string_view<CharT, Traits> str,
+                              const std_format_spec_base& spec) noexcept
+        : base{str.substr(0, spec.precision.integer)} {
+        LRSTD_ASSERT(spec.precision.tag == integer_or_arg_id::which::integer);
+    }
+
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
                                      alignment_t align,
@@ -1967,9 +1982,9 @@ struct str_formatter_base : public std_formatter_driver<CharT> {
                   str_default_engine<CharT, Traits>{s}.write_value(fc.out()));
             return fc.out();
         }
-        base::finalize_spec(str_spec_delegate{});
-        fc.advance_to(
-              base::format_to_spec(fc, str_spec_engine<CharT, Traits>{{s}}));
+        base::finalize_spec(fc, str_spec_delegate{});
+        fc.advance_to(base::format_to_spec(
+              fc, str_spec_engine<CharT, Traits>{s, *base::spec}));
         return fc.out();
     }
 };

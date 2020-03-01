@@ -35,6 +35,10 @@ TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
         CHECK(format(str("{:_>6}"), str("hey"sv)) == str("___hey"));
     }
     {
+        CHECK(format(str("{:.5}"), str("strings can have precision")) ==
+              str("strin"));
+    }
+    {
         CHECK(format(str("{:}"), true) == str("true"));
         CHECK(format(str("{0: ^6}"), true) == str(" true "));
         CHECK(format(str("{:_>6}"), false) == str("_false"));
@@ -117,4 +121,14 @@ TEMPLATE_TEST_CASE("escaping", "[formatters]", char, wchar_t) {
     CHECK(format(str("{}}}"), 5) == str("5}"));
     CHECK(format(str("{}a{{"), 5) == str("5a{"));
     CHECK(format(str("{}a}}"), 5) == str("5a}"));
+}
+
+TEMPLATE_TEST_CASE("dynamic_width", "[formatters]", char, wchar_t) {
+    using lrstd::format;
+    str_fn<TestType> str;
+
+    CHECK(format(str("{:{}}"), 1, 2) == str(" 1"));
+    CHECK(format(str("{0:{1}}"), 1, 2) == str(" 1"));
+    CHECK(format(str("{1:{1}}"), 1, 2) == str(" 2"));
+    CHECK(format(str("{1:{0}}"), 1, 2) == str("2"));
 }
