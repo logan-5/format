@@ -837,11 +837,8 @@ inline constexpr bool is_defaulted(alignment_t a) noexcept {
     return a == alignment_t::defaulted;
 }
 
-enum class sign_t : char { minus, plus, space };
-struct width_t {
-    integer_or_arg_id i{};
-    bool zero_pad = false;
-};
+enum class sign_t : char { none, minus, plus, space };
+
 enum class type_t : char {
     defaulted = ' ',
     a = 'a',
@@ -866,12 +863,18 @@ enum class type_t : char {
 inline constexpr bool is_defaulted(type_t t) noexcept {
     return t == type_t::defaulted;
 }
+inline /*constexpr*/ bool is_integer_type(type_t t) noexcept {
+    constexpr std::string_view integer_types = "bBdoxX";
+    return std::find(integer_types.begin(), integer_types.end(),
+                     static_cast<char>(t)) != integer_types.end();
+}
 
 struct std_format_spec_base {
     alignment_t align{alignment_t::defaulted};
     bool alternate = false;
-    sign_t sign{sign_t::minus};
-    width_t width;
+    sign_t sign;
+    bool zero_pad;
+    integer_or_arg_id width;
     integer_or_arg_id precision;
     type_t type{type_t::defaulted};
 };
@@ -898,9 +901,9 @@ struct std_spec_parser {
         if (fmt.consume('#')) {
             spec.alternate = true;
         }
-        const bool width_leading_zero = fmt.consume('0');
+        spec.zero_pad = fmt.consume('0');
         if (const auto width = parse_integer_or_arg_id<false>(fmt)) {
-            spec.width = width_t{*width, width_leading_zero};
+            spec.width = *width;
         }
         parse_type();
         parse_context.advance_to(fmt.begin());
@@ -947,6 +950,8 @@ struct std_spec_parser {
             spec.sign = sign_t::minus;
         else if (fmt.consume(' '))
             spec.sign = sign_t::space;
+        else
+            spec.sign = sign_t::none;
     }
 
     constexpr std::optional<integer_or_arg_id> parse_integer_or_arg_id_impl(
@@ -1186,12 +1191,12 @@ struct std_formatter_driver {
           const basic_format_context<Out, CharT>& fc) const {
         LRSTD_ASSERT(spec.has_value());
         using I = integer_or_arg_id;
-        switch (spec->width.i.tag) {
+        switch (spec->width.tag) {
             case I::which::integer:
-                return spec->width.i.integer;
+                return spec->width.integer;
             case I::which::arg_id:
                 return visit_format_arg(get_width_func{},
-                                        fc.arg(spec->width.i.arg_id._id));
+                                        fc.arg(spec->width.arg_id._id));
         }
         LRSTD_UNREACHABLE();
     }
@@ -1313,6 +1318,25 @@ struct format_int_storage_type<bool> {
     using type = char;
 };
 
+struct integral_spec_verify_base {
+    constexpr void verify(const std_format_spec_base& spec) const {
+        do {
+            if (spec.type == type_t::c) {
+                if (spec.sign != sign_t::none)
+                    break;
+                if (spec.alternate)
+                    break;
+                if (spec.zero_pad)
+                    break;
+            } else if (!is_integer_type(spec.type)) {
+                break;
+            }
+            return;
+        } while (false);
+        throw_format_error("invalid format spec for integral type");
+    }
+};
+
 template <class CharT>
 struct char_default_engine {
     CharT c;
@@ -1322,18 +1346,19 @@ struct char_default_engine {
     }
 };
 
-struct char_spec_delegate {
+struct char_spec_delegate : integral_spec_verify_base {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         if (is_defaulted(spec.type)) {
             spec.type = type_t::c;
+        } else if (spec.type != type_t::c && spec.sign == sign_t::none) {
+            spec.sign = sign_t::minus;
         }
         if (is_defaulted(spec.align)) {
             spec.align = spec.type == type_t::c ? alignment_t::left
                                                 : alignment_t::right;
+        } else {
+            spec.zero_pad = false;
         }
-    }
-    constexpr void verify(const std_format_spec_base&) const {
-        // TODO
     }
 };
 
@@ -1369,13 +1394,20 @@ struct bool_spec_delegate {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         if (is_defaulted(spec.type)) {
             spec.type = type_t::s;
+        } else if (spec.type != type_t::s && spec.sign == sign_t::none) {
+            spec.sign = sign_t::minus;
         }
         if (is_defaulted(spec.align)) {
             spec.align = spec.type == type_t::s ? alignment_t::left
                                                 : alignment_t::right;
+        } else {
+            spec.zero_pad = false;
         }
     }
-    constexpr void verify(const std_format_spec_base&) const {
+    constexpr void verify(const std_format_spec_base& spec) const {
+        if (spec.type != type_t::s && spec.type != type_t::c &&
+            !is_integer_type(spec.type))
+            throw_format_error("invalid format spec for bool");
         // TODO
     }
 };
@@ -1432,6 +1464,8 @@ struct integer_spec_engine_common {
                 return negative ? '-' : '\0';
             case S::space:
                 return negative ? '-' : ' ';
+            case S::none:
+                break;
         }
         LRSTD_UNREACHABLE();
     }
@@ -1521,19 +1555,19 @@ struct integer_spec_engine_base : integer_spec_engine_common {
     }
 };
 
-struct integer_spec_delegate {
+struct integer_spec_delegate : integral_spec_verify_base {
     constexpr void set_defaults(std_format_spec_base& spec) noexcept {
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::right;
         } else {
-            spec.width.zero_pad = false;
+            spec.zero_pad = false;
         }
         if (is_defaulted(spec.type)) {
             spec.type = type_t::d;
         }
-    }
-    constexpr void verify(const std_format_spec_base&) const {
-        // TODO
+        if (spec.sign == sign_t::none) {
+            spec.sign = sign_t::minus;
+        }
     }
 };
 
@@ -1643,7 +1677,7 @@ struct int_formatter_base : public std_formatter_driver<CharT> {
             default:
                 break;
         }
-        if (base::spec->width.zero_pad)
+        if (base::spec->zero_pad)
             return base::format_to_spec(
                   fc,
                   integer_zero_pad_spec_engine<Int, CharT>{{i, *base::spec}});
@@ -1876,6 +1910,8 @@ struct str_spec_delegate {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::left;
+        } else {
+            spec.zero_pad = false;
         }
         if (is_defaulted(spec.type)) {
             spec.type = type_t::s;
