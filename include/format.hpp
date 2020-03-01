@@ -315,9 +315,12 @@ struct write_n_wrapper {
 
 }  // namespace detail
 
+template <class Context>
+struct basic_format_arg;
+
 namespace detail {
 template <class Context, class... Args>
-struct args_storage;
+struct format_arg_store;
 
 enum class arg_tag : char {
     empty,
@@ -334,162 +337,204 @@ enum class arg_tag : char {
     vptr,
     h,
 };
+
+template <class T>
+constexpr arg_tag tag_for() noexcept {
+    if constexpr (std::is_same_v<T, std::monostate>)
+        return arg_tag::empty;
+    else if constexpr (std::is_same_v<T, bool>)
+        return arg_tag::b;
+    else if constexpr (std::is_same_v<T, char>)
+        return arg_tag::c;
+    else if constexpr (std::is_same_v<T, wchar_t>)
+        return arg_tag::c;
+    else if constexpr (std::is_same_v<T, int>)
+        return arg_tag::i;
+    else if constexpr (std::is_same_v<T, unsigned int>)
+        return arg_tag::ui;
+    else if constexpr (std::is_same_v<T, long long int>)
+        return arg_tag::lli;
+    else if constexpr (std::is_same_v<T, unsigned long long int>)
+        return arg_tag::ulli;
+    else if constexpr (std::is_same_v<T, double>)
+        return arg_tag::d;
+    else if constexpr (std::is_same_v<T, long double>)
+        return arg_tag::ld;
+    else if constexpr (std::is_same_v<T, const char*>)
+        return arg_tag::cptr;
+    else if constexpr (std::is_same_v<T, const wchar_t*>)
+        return arg_tag::cptr;
+    else if constexpr (std::is_same_v<T, std::string_view>)
+        return arg_tag::sv;
+    else if constexpr (std::is_same_v<T, std::wstring_view>)
+        return arg_tag::sv;
+    else if constexpr (std::is_same_v<T, const void*>)
+        return arg_tag::vptr;
+    else
+        return arg_tag::h;
+}
+
+template <class T>
+constexpr arg_tag tag_for(T&&) noexcept {
+    return tag_for<std::decay_t<T>>();
+}
+
+template <class Context>
+class arg_handle {
+    using char_type = typename Context::char_type;
+    const void* _ptr;
+    void (*_format)(basic_format_parse_context<char_type>&,
+                    Context&,
+                    const void*);
+
+    template <class T>
+    explicit LRSTD_EXTRA_CONSTEXPR arg_handle(const T& val) noexcept
+        : _ptr{std::addressof(val)}
+        , _format{[](basic_format_parse_context<char_type>& pc,
+                     Context& fc,
+                     const void* ptr) {
+            typename Context::template formatter_type<T> f;
+            pc.advance_to(f.parse(pc));
+            fc.advance_to(f.format(*static_cast<const T*>(ptr), fc));
+        }} {}
+
+    template <class C, class T>
+    friend arg_handle<C> make_arg_handle(const T&) noexcept;
+
+   public:
+    LRSTD_EXTRA_CONSTEXPR void format(basic_format_parse_context<char_type>& pc,
+                                      Context& fc) const {
+        _format(pc, fc, _ptr);
+    }
+};
+
+template <class Context, class T>
+arg_handle<Context> make_arg_handle(const T& t) noexcept {
+    return arg_handle<Context>(t);
+}
+
+template <class Context>
+union arg_storage {
+    using char_type = typename Context::char_type;
+
+    std::monostate empty;
+    bool b;
+    char_type c;
+    int i;
+    unsigned int ui;
+    long long int lli;
+    unsigned long long int ulli;
+    double d;
+    long double ld;
+    const char_type* cptr;
+    basic_string_view<char_type> sv;
+    const void* vptr;
+    arg_handle<Context> h;
+
+    constexpr arg_storage(std::monostate e) noexcept : empty{e} {}
+    constexpr arg_storage(bool b) noexcept : b{b} {}
+    constexpr arg_storage(char_type c) noexcept : c{c} {}
+    constexpr arg_storage(int i) noexcept : i{i} {}
+    constexpr arg_storage(unsigned int ui) noexcept : ui{ui} {}
+    constexpr arg_storage(long long int lli) noexcept : lli{lli} {}
+    constexpr arg_storage(unsigned long long int ulli) noexcept : ulli{ulli} {}
+    constexpr arg_storage(double d) noexcept : d{d} {}
+    constexpr arg_storage(long double ld) noexcept : ld{ld} {}
+    constexpr arg_storage(const char_type* cptr) noexcept : cptr{cptr} {}
+    constexpr arg_storage(basic_string_view<char_type> sv) noexcept : sv{sv} {}
+    constexpr arg_storage(const void* vptr) noexcept : vptr{vptr} {}
+    constexpr arg_storage(arg_handle<Context> h) noexcept : h{h} {}
+};
+
+template <class Context,
+          class T,
+          typename = std::enable_if_t<std::is_same_v<
+                decltype(typename Context::template formatter_type<T>().format(
+                      std::declval<const T&>(),
+                      std::declval<Context&>())),
+                typename Context::iterator>>>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(const T& v) noexcept {
+    using char_type = typename Context::char_type;
+    if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, char_type>) {
+        return v;
+    } else if constexpr (std::is_same_v<T, char> &&
+                         std::is_same_v<char_type, wchar_t>) {
+        return static_cast<wchar_t>(v);
+    } else if constexpr (detail::is_signed_integer_v<T> &&
+                         sizeof(T) <= sizeof(int)) {
+        return static_cast<int>(v);
+    } else if constexpr (detail::is_unsigned_integer_v<T> &&
+                         sizeof(T) <= sizeof(unsigned int)) {
+        return static_cast<unsigned int>(v);
+    } else if constexpr (detail::is_signed_integer_v<T> &&
+                         sizeof(T) <= sizeof(long long int)) {
+        return static_cast<long long int>(v);
+    } else if constexpr (detail::is_unsigned_integer_v<T> &&
+                         sizeof(T) <= sizeof(unsigned long long int)) {
+        return static_cast<unsigned long long int>(v);
+    } else {
+        return make_arg_handle<Context>(v);
+    }
+}
+template <class>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(float n) noexcept {
+    return static_cast<double>(n);
+}
+template <class>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(double n) noexcept {
+    return n;
+}
+template <class>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(long double n) noexcept {
+    return n;
+}
+template <class Context>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(
+      const typename Context::char_type* s) noexcept {
+    return s;
+}
+template <class Context, class Traits>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(
+      std::basic_string_view<typename Context::char_type, Traits> s) noexcept {
+    return s;
+}
+template <class Context, class Traits, class Alloc>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(
+      const std::basic_string<typename Context::char_type, Traits, Alloc>&
+            s) noexcept {
+    return std::basic_string_view<typename Context::char_type, Traits>(s);
+}
+template <class>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(std::nullptr_t) noexcept {
+    return static_cast<const void*>(nullptr);
+}
+template <class, class T, class = std::enable_if_t<std::is_void_v<T>>>
+LRSTD_EXTRA_CONSTEXPR auto to_storage_type(T* p) noexcept {
+    return static_cast<const void*>(p);
+}
+
 }  // namespace detail
 
 template <class Context>
 struct basic_format_arg {
    public:
-    class handle {
-        using char_type = typename Context::char_type;
-        const void* _ptr;
-        void (*_format)(basic_format_parse_context<char_type>&,
-                        Context&,
-                        const void*);
-
-        template <class T>
-        explicit LRSTD_EXTRA_CONSTEXPR handle(const T& val) noexcept
-            : _ptr{std::addressof(val)}
-            , _format{[](basic_format_parse_context<char_type>& pc,
-                         Context& fc,
-                         const void* ptr) {
-                typename Context::template formatter_type<T> f;
-                pc.advance_to(f.parse(pc));
-                fc.advance_to(f.format(*static_cast<const T*>(ptr), fc));
-            }} {}
-
-        friend struct basic_format_arg;
-
-       public:
-        LRSTD_EXTRA_CONSTEXPR void format(
-              basic_format_parse_context<char_type>& pc,
-              Context& fc) const {
-            _format(pc, fc, _ptr);
-        }
-    };
+    using handle = detail::arg_handle<Context>;
 
    private:
     using char_type = typename Context::char_type;
 
-    union arg_storage {
-        std::monostate empty;
-        bool b;
-        char_type c;
-        int i;
-        unsigned int ui;
-        long long int lli;
-        unsigned long long int ulli;
-        double d;
-        long double ld;
-        const char_type* cptr;
-        basic_string_view<char_type> sv;
-        const void* vptr;
-        handle h;
-
-        constexpr arg_storage(std::monostate e) noexcept : empty{e} {}
-        constexpr arg_storage(bool b) noexcept : b{b} {}
-        constexpr arg_storage(char_type c) noexcept : c{c} {}
-        constexpr arg_storage(int i) noexcept : i{i} {}
-        constexpr arg_storage(unsigned int ui) noexcept : ui{ui} {}
-        constexpr arg_storage(long long int lli) noexcept : lli{lli} {}
-        constexpr arg_storage(unsigned long long int ulli) noexcept
-            : ulli{ulli} {}
-        constexpr arg_storage(double d) noexcept : d{d} {}
-        constexpr arg_storage(long double ld) noexcept : ld{ld} {}
-        constexpr arg_storage(const char_type* cptr) noexcept : cptr{cptr} {}
-        constexpr arg_storage(basic_string_view<char_type> sv) noexcept
-            : sv{sv} {}
-        constexpr arg_storage(const void* vptr) noexcept : vptr{vptr} {}
-        constexpr arg_storage(handle h) noexcept : h{h} {}
-    };
-    struct storage_and_tag {
-        using tag_t = detail::arg_tag;
-        arg_storage storage;
-        tag_t tag;
-        constexpr storage_and_tag(std::monostate e = {}) noexcept
-            : storage{e}, tag{tag_t::empty} {}
-        constexpr storage_and_tag(bool b) noexcept
-            : storage{b}, tag{tag_t::b} {}
-        constexpr storage_and_tag(char_type c) noexcept
-            : storage{c}, tag{tag_t::c} {}
-        constexpr storage_and_tag(int i) noexcept : storage{i}, tag{tag_t::i} {}
-        constexpr storage_and_tag(unsigned int ui) noexcept
-            : storage{ui}, tag{tag_t::ui} {}
-        constexpr storage_and_tag(long long int lli) noexcept
-            : storage{lli}, tag{tag_t::lli} {}
-        constexpr storage_and_tag(unsigned long long int ulli) noexcept
-            : storage{ulli}, tag{tag_t::ulli} {}
-        constexpr storage_and_tag(double d) noexcept
-            : storage{d}, tag{tag_t::d} {}
-        constexpr storage_and_tag(long double ld) noexcept
-            : storage{ld}, tag{tag_t::ld} {}
-        constexpr storage_and_tag(const char_type* cptr) noexcept
-            : storage{cptr}, tag{tag_t::cptr} {}
-        constexpr storage_and_tag(basic_string_view<char_type> sv) noexcept
-            : storage{sv}, tag{tag_t::sv} {}
-        constexpr storage_and_tag(const void* vptr) noexcept
-            : storage{vptr}, tag{tag_t::vptr} {}
-        constexpr storage_and_tag(handle h) noexcept
-            : storage{h}, tag{tag_t::h} {}
-    };
-    storage_and_tag value;
+    detail::arg_storage<Context> value;
+    detail::arg_tag tag;
 
     template <class T,
-              typename = std::enable_if_t<std::is_same_v<
-                    decltype(typename Context::template formatter_type<T>()
-                                   .format(std::declval<const T&>(),
-                                           std::declval<Context&>())),
-                    typename Context::iterator>>>
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(const T& v) noexcept
-        : value{[&] {
-            if constexpr (std::is_same_v<T, bool> ||
-                          std::is_same_v<T, char_type>) {
-                return v;
-            } else if constexpr (std::is_same_v<T, char> &&
-                                 std::is_same_v<char_type, wchar_t>) {
-                return static_cast<wchar_t>(v);
-            } else if constexpr (detail::is_signed_integer_v<T> &&
-                                 sizeof(T) <= sizeof(int)) {
-                return static_cast<int>(v);
-            } else if constexpr (detail::is_unsigned_integer_v<T> &&
-                                 sizeof(T) <= sizeof(unsigned int)) {
-                return static_cast<unsigned int>(v);
-            } else if constexpr (detail::is_signed_integer_v<T> &&
-                                 sizeof(T) <= sizeof(long long int)) {
-                return static_cast<long long int>(v);
-            } else if constexpr (detail::is_unsigned_integer_v<T> &&
-                                 sizeof(T) <= sizeof(unsigned long long int)) {
-                return static_cast<unsigned long long int>(v);
-            } else {
-                return handle(v);
-            }
-        }()} {}
-
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(float n) noexcept
-        : value{static_cast<double>(n)} {}
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(double n) noexcept
-        : value{n} {}
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(long double n) noexcept
-        : value{n} {}
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(const char_type* s) noexcept
-        : value{s} {}
-
-    template <class Traits>
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(
-          std::basic_string_view<char_type, Traits> s) noexcept
-        : value{s} {}
-    template <class Traits, class Alloc>
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(
-          const std::basic_string<char_type, Traits, Alloc>& s) noexcept
-        : value{s} {}
-
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(std::nullptr_t) noexcept
-        : value{static_cast<const void*>(nullptr)} {}
-
-    template <class T, class = std::enable_if_t<std::is_void_v<T>>>
-    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(T* p) noexcept : value{p} {}
+              class S = decltype(
+                    detail::to_storage_type<Context>(std::declval<T>()))>
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(const T& t) noexcept
+        : value{detail::to_storage_type<Context>(t)}
+        , tag{detail::tag_for<S>()} {}
 
     template <class Ctx, class... Args>
-    friend LRSTD_EXTRA_CONSTEXPR detail::args_storage<Ctx, Args...>
+    friend LRSTD_EXTRA_CONSTEXPR detail::format_arg_store<Ctx, Args...>
     make_format_args(const Args&...);
 
     template <class Visitor, class Ctx>
@@ -497,10 +542,11 @@ struct basic_format_arg {
                                                        basic_format_arg<Ctx>);
 
    public:
-    LRSTD_EXTRA_CONSTEXPR basic_format_arg() noexcept = default;
+    LRSTD_EXTRA_CONSTEXPR basic_format_arg() noexcept
+        : value{std::monostate{}}, tag{detail::arg_tag::empty} {}
 
     LRSTD_EXTRA_CONSTEXPR explicit operator bool() const noexcept {
-        return value.tag != detail::arg_tag::empty;
+        return tag != detail::arg_tag::empty;
     }
 };  // namespace lrstd
 
@@ -516,40 +562,40 @@ LRSTD_EXTRA_CONSTEXPR auto visit_format_arg(Visitor&& visitor,
 #endif
     };
     using T = detail::arg_tag;
-    switch (arg.value.tag) {
+    switch (arg.tag) {
         case T::b:
-            return visit(arg.value.storage.b);
+            return visit(arg.value.b);
         case T::c:
-            return visit(arg.value.storage.c);
+            return visit(arg.value.c);
         case T::i:
-            return visit(arg.value.storage.i);
+            return visit(arg.value.i);
         case T::ui:
-            return visit(arg.value.storage.ui);
+            return visit(arg.value.ui);
         case T::lli:
-            return visit(arg.value.storage.lli);
+            return visit(arg.value.lli);
         case T::ulli:
-            return visit(arg.value.storage.ulli);
+            return visit(arg.value.ulli);
         case T::d:
-            return visit(arg.value.storage.d);
+            return visit(arg.value.d);
         case T::ld:
-            return visit(arg.value.storage.ld);
+            return visit(arg.value.ld);
         case T::cptr:
-            return visit(arg.value.storage.cptr);
+            return visit(arg.value.cptr);
         case T::sv:
-            return visit(arg.value.storage.sv);
+            return visit(arg.value.sv);
         case T::vptr:
-            return visit(arg.value.storage.vptr);
+            return visit(arg.value.vptr);
         case T::h:
-            return visit(arg.value.storage.h);
+            return visit(arg.value.h);
         case T::empty:
-            return visit(arg.value.storage.empty);
+            return visit(arg.value.empty);
     }
     LRSTD_UNREACHABLE();
 }
 namespace detail {
 
 template <class Context, class... Args>
-struct args_storage {
+struct format_arg_store {
     std::array<basic_format_arg<Context>, sizeof...(Args)> args;
 };
 }  // namespace detail
@@ -568,7 +614,7 @@ class basic_format_args {
 
     template <class... Args>
     LRSTD_EXTRA_CONSTEXPR basic_format_args(
-          const detail::args_storage<Context, Args...>& storage) noexcept
+          const detail::format_arg_store<Context, Args...>& storage) noexcept
         : _size{storage.args.size()}, _data{storage.args.data()} {}
 
     LRSTD_EXTRA_CONSTEXPR basic_format_arg<Context> get(std::size_t i) const
@@ -611,13 +657,13 @@ class basic_format_context {
 };
 
 template <class Context = format_context, class... Args>
-LRSTD_EXTRA_CONSTEXPR detail::args_storage<Context, Args...> make_format_args(
-      const Args&... args) {
+LRSTD_EXTRA_CONSTEXPR detail::format_arg_store<Context, Args...>
+make_format_args(const Args&... args) {
     return {basic_format_arg<Context>(args)...};
 }
 
 template <class... Args>
-LRSTD_EXTRA_CONSTEXPR detail::args_storage<wformat_context, Args...>
+LRSTD_EXTRA_CONSTEXPR detail::format_arg_store<wformat_context, Args...>
 make_wformat_args(const Args&... args) {
     return make_format_args<wformat_context>(args...);
 }
