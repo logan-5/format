@@ -54,12 +54,18 @@ TEMPLATE_TEST_CASE("invalid_int", "", char, wchar_t) {
     CHECK_THROWS_AS(format(str("{:p}"), 5), lrstd::format_error);
 }
 
-TEMPLATE_TEST_CASE("invalid_char_bool",
+TEMPLATE_TEST_CASE("invalid_nonarithmetic",
                    "",
                    (std::tuple<char, char>),
                    (std::tuple<wchar_t, char>),
                    (std::tuple<char, bool>),
-                   (std::tuple<wchar_t, bool>)) {
+                   (std::tuple<wchar_t, bool>),
+                   (std::tuple<char, std::string>),
+                   (std::tuple<wchar_t, std::wstring>),
+                   (std::tuple<char, std::string_view>),
+                   (std::tuple<wchar_t, std::wstring_view>),
+                   (std::tuple<char, void*>),
+                   (std::tuple<wchar_t, void*>)) {
     using lrstd::format;
 
     using CharType = std::tuple_element_t<0, TestType>;
@@ -67,8 +73,7 @@ TEMPLATE_TEST_CASE("invalid_char_bool",
 
     str_fn<CharType> str;
 
-    FormatteeType c = 1;
-    CHECK_THROWS_AS(format(str("{:.1}"), c), lrstd::format_error);
+    FormatteeType c = {};
 
     CHECK_THROWS_AS(format(str("{:+}"), c), lrstd::format_error);
     CHECK_THROWS_AS(format(str("{:-}"), c), lrstd::format_error);
@@ -78,18 +83,8 @@ TEMPLATE_TEST_CASE("invalid_char_bool",
     CHECK_THROWS_AS(format(str("{:-#}"), c), lrstd::format_error);
     CHECK_THROWS_AS(format(str("{: #}"), c), lrstd::format_error);
 
-    CHECK_THROWS_AS(format(str("{:+c}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:-c}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{: c}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:#c}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:+#c}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:-#c}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{: #c}"), c), lrstd::format_error);
-
     CHECK_THROWS_AS(format(str("{:0}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:0c}"), c), lrstd::format_error);
     CHECK_NOTHROW(format(str("{:<0}"), c));
-    CHECK_NOTHROW(format(str("{:<0c}"), c));
 
     CHECK_THROWS_AS(format(str("{:a}"), c), lrstd::format_error);
     CHECK_THROWS_AS(format(str("{:A}"), c), lrstd::format_error);
@@ -99,11 +94,21 @@ TEMPLATE_TEST_CASE("invalid_char_bool",
     CHECK_THROWS_AS(format(str("{:g}"), c), lrstd::format_error);
     CHECK_THROWS_AS(format(str("{:G}"), c), lrstd::format_error);
     CHECK_THROWS_AS(format(str("{:n}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:p}"), c), lrstd::format_error);
 }
 
-TEMPLATE_TEST_CASE("no_char_s", "", char, wchar_t) {
+TEMPLATE_TEST_CASE("invalid_nonarthmetic_nongeneric", "", char, wchar_t) {
     using lrstd::format;
     str_fn<TestType> str;
     CHECK_THROWS_AS(format(str("{:s}"), str('x')), lrstd::format_error);
+
+    CHECK_THROWS_AS(format(str("{:.1}"), str('x')), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:.1}"), false), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:p}"), str('x')), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:p}"), false), lrstd::format_error);
+
+    CHECK_THROWS_AS(format(str("{:c}"), str("")), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:p}"), str("")), lrstd::format_error);
+
+    CHECK_THROWS_AS(format(str("{:c}"), (void*)nullptr), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:s}"), (void*)nullptr), lrstd::format_error);
 }

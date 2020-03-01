@@ -1327,22 +1327,31 @@ struct format_int_storage_type<bool> {
     using type = char;
 };
 
+struct non_arithmetic_verifier {
+    static constexpr void verify(const std_format_spec_base& spec) {
+        do {
+            if (spec.sign != sign_t::none)
+                break;
+            if (spec.alternate)
+                break;
+            if (spec.zero_pad)
+                break;
+            return;
+        } while (false);
+        throw_format_error("invalid format spec for non-arithmetic type");
+    }
+};
+
 template <bool AllowS = false>
-struct integral_spec_verify_base {
-    constexpr void verify(const std_format_spec_base& spec) const {
+struct integral_spec_verifier {
+    static constexpr void verify(const std_format_spec_base& spec) {
         do {
             if (spec.has_precision())
                 break;
-            if (spec.type == type_t::c || (AllowS && spec.type == type_t::s)) {
-                if (spec.sign != sign_t::none)
-                    break;
-                if (spec.alternate)
-                    break;
-                if (spec.zero_pad)
-                    break;
-            } else if (!is_integer_type(spec.type)) {
+            if (spec.type == type_t::c || (AllowS && spec.type == type_t::s))
+                non_arithmetic_verifier{}.verify(spec);
+            else if (!is_integer_type(spec.type))
                 break;
-            }
             return;
         } while (false);
         throw_format_error("invalid format spec for integral type");
@@ -1358,8 +1367,8 @@ struct char_default_engine {
     }
 };
 
-struct char_spec_delegate : integral_spec_verify_base<> {
-    constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
+struct char_spec_delegate : integral_spec_verifier<> {
+    static constexpr void set_defaults(std_format_spec_base& spec) noexcept {
         if (is_defaulted(spec.type)) {
             spec.type = type_t::c;
         } else if (spec.type != type_t::c && spec.sign == sign_t::none) {
@@ -1377,17 +1386,17 @@ struct char_spec_delegate : integral_spec_verify_base<> {
 template <class CharT>
 struct char_spec_engine : char_default_engine<CharT> {
     template <class Out>
-    constexpr Out write_left_padding(std::size_t width,
-                                     alignment_t align,
-                                     CharT fill,
-                                     Out out) const {
+    static constexpr Out write_left_padding(std::size_t width,
+                                            alignment_t align,
+                                            CharT fill,
+                                            Out out) {
         return simple_padding_engine{align}.write_left(width, 1, fill, out);
     }
     template <class Out>
-    constexpr Out write_right_padding(std::size_t width,
-                                      alignment_t align,
-                                      CharT fill,
-                                      Out out) const {
+    static constexpr Out write_right_padding(std::size_t width,
+                                             alignment_t align,
+                                             CharT fill,
+                                             Out out) {
         return simple_padding_engine{align}.write_right(width, 1, fill, out);
     }
 };
@@ -1402,8 +1411,8 @@ struct bool_default_engine {
     constexpr std::size_t value_width() const noexcept { return b ? 4 : 5; }
 };
 
-struct bool_spec_delegate : integral_spec_verify_base<true> {
-    constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
+struct bool_spec_delegate : integral_spec_verifier<true> {
+    static constexpr void set_defaults(std_format_spec_base& spec) noexcept {
         if (is_defaulted(spec.type)) {
             spec.type = type_t::s;
         } else if (spec.type != type_t::s && spec.type != type_t::c &&
@@ -1562,8 +1571,8 @@ struct integer_spec_engine_base : integer_spec_engine_common {
     }
 };
 
-struct integer_spec_delegate : integral_spec_verify_base<> {
-    constexpr void set_defaults(std_format_spec_base& spec) noexcept {
+struct integer_spec_delegate : integral_spec_verifier<> {
+    static constexpr void set_defaults(std_format_spec_base& spec) noexcept {
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::right;
         } else {
@@ -1629,10 +1638,10 @@ struct integer_zero_pad_spec_engine : integer_spec_engine_base<Int> {
               width, value_width(), base::prefix, base::sign_char, out);
     }
     template <class Out>
-    constexpr Out write_right_padding(std::size_t,
-                                      alignment_t,
-                                      CharT,
-                                      Out out) const {
+    static constexpr Out write_right_padding(std::size_t,
+                                             alignment_t,
+                                             CharT,
+                                             Out out) {
         return out;
     }
     template <class Out>
@@ -1829,18 +1838,20 @@ struct formatter_impl<long double, CharT, true>
 // pointer formatters
 
 struct ptr_spec_delegate {
-    constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
+    static constexpr void set_defaults(std_format_spec_base& spec) noexcept {
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::left;
+        } else {
+            spec.zero_pad = false;
         }
         if (is_defaulted(spec.type)) {
             spec.type = type_t::p;
         }
     }
-    constexpr void verify(const std_format_spec_base& spec) const {
+    static constexpr void verify(const std_format_spec_base& spec) {
         if (spec.type != type_t::p)
             throw_format_error("invalid format type for pointer");
-        // TODO
+        non_arithmetic_verifier{}.verify(spec);
     }
 };
 
@@ -1914,7 +1925,7 @@ struct formatter_impl<const void*, CharT, true>
 // string formatters
 
 struct str_spec_delegate {
-    constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
+    static constexpr void set_defaults(std_format_spec_base& spec) noexcept {
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::left;
         } else {
@@ -1924,8 +1935,10 @@ struct str_spec_delegate {
             spec.type = type_t::s;
         }
     }
-    constexpr void verify(const std_format_spec_base&) const {
-        // TODO
+    static constexpr void verify(const std_format_spec_base& spec) {
+        if (spec.type != type_t::s)
+            throw_format_error("invalid type specifier for string");
+        non_arithmetic_verifier{}.verify(spec);
     }
 };
 
