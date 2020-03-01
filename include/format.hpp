@@ -19,6 +19,7 @@ namespace lrstd {
 
 #define LRSTD_UNREACHABLE() __builtin_unreachable()
 #define LRSTD_ASSERT(...) assert(__VA_ARGS__)
+#define LRSTD_ALWAYS_INLINE __attribute__((always_inline))
 
 // #define LRSTD_USE_EXTRA_CONSTEXPR false
 
@@ -114,7 +115,8 @@ class format_error : public std::runtime_error {
 };
 
 namespace detail {
-[[noreturn]] inline void throw_format_error(const char* w) noexcept(false) {
+[[noreturn]] LRSTD_ALWAYS_INLINE inline void throw_format_error(
+      const char* w) noexcept(false) {
     throw format_error(w);
 }
 }  // namespace detail
