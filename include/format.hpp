@@ -113,6 +113,12 @@ class format_error : public std::runtime_error {
     explicit format_error(const char* w) : std::runtime_error{w} {}
 };
 
+namespace detail {
+[[noreturn]] inline void throw_format_error(const char* w) noexcept(false) {
+    throw format_error(w);
+}
+}  // namespace detail
+
 template <class It>
 struct iter_difference {
     using type = typename std::iterator_traits<
@@ -202,7 +208,8 @@ class basic_format_parse_context {
             _indexing = indexing::automatic;
             return _next_arg_id++;
         }
-        throw format_error{"mixing of automatic and manual argument indexing"};
+        detail::throw_format_error(
+              "mixing of automatic and manual argument indexing");
     }
     constexpr void check_arg_id(std::size_t id_) {
         if (id_ >= _num_args)
@@ -210,8 +217,8 @@ class basic_format_parse_context {
         if (_indexing != indexing::automatic)
             _indexing = indexing::manual;
         else
-            throw format_error{
-                  "mixing of automatic and manual argument indexing"};
+            detail::throw_format_error(
+                  "mixing of automatic and manual argument indexing");
     }
 };
 
@@ -1149,13 +1156,13 @@ struct nonoverlapping_generic_writer
 
 struct get_width_func {
     std::size_t operator()(...) const noexcept(false) {
-        throw format_error("width argument must be an integral type");
+        throw_format_error("width argument must be an integral type");
     }
     template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
     std::size_t operator()(Int i) const noexcept(false) {
         if constexpr (std::is_signed_v<Int>) {
             if (i < 0) {
-                throw format_error("invalid width");
+                throw_format_error("invalid width");
             }
         }
         return static_cast<std::size_t>(i);
@@ -1172,7 +1179,7 @@ struct std_formatter_driver {
             spec.emplace();
             std_spec_parser<CharT>{pc, *spec}.parse();
             if (pc.begin() != pc.end())
-                throw format_error("bad standard format spec string");
+                throw_format_error("bad standard format spec string");
         }
         return pc.begin();
     }
@@ -1629,7 +1636,7 @@ struct int_formatter_base : public std_formatter_driver<CharT> {
         switch (base::spec->type) {
             case T::c:
                 if (!representable_as_char<CharT>(i)) {
-                    throw format_error("value not representable as char");
+                    throw_format_error("value not representable as char");
                 }
                 return base::format_to_spec(
                       fc, char_spec_engine<CharT>{{static_cast<CharT>(i)}});
@@ -1794,7 +1801,7 @@ struct ptr_spec_delegate {
     }
     constexpr void verify(const std_format_spec_base& spec) const {
         if (spec.type != type_t::p)
-            throw format_error("invalid format type for pointer");
+            throw_format_error("invalid format type for pointer");
         // TODO
     }
 };
@@ -2057,7 +2064,7 @@ struct fmt_str_parser {
 
 struct throw_uninitialized_format_arg {
     void operator()(std::monostate) const {
-        throw format_error("uninitialized format argument");
+        throw_format_error("uninitialized format argument");
     }
 };
 
@@ -2131,7 +2138,7 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
     };
     if (!fmt_str_parser<CharT>{{fmt}}.parse(
               Callbacks{context, parse_context})) {
-        throw format_error("invalid format string");
+        throw_format_error("invalid format string");
     }
     return context.out();
 }
