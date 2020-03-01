@@ -37,6 +37,10 @@ TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
     {
         CHECK(format(str("{:.5}"), str("strings can have precision")) ==
               str("strin"));
+        CHECK(format(str("{:.5s}"), str("strings can have precision")) ==
+              str("strin"));
+        CHECK(format(str("{:.0}"), str("strings can have precision")) ==
+              str(""));
     }
     {
         CHECK(format(str("{:}"), true) == str("true"));

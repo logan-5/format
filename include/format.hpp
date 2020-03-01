@@ -1327,10 +1327,13 @@ struct format_int_storage_type<bool> {
     using type = char;
 };
 
+template <bool AllowS = false>
 struct integral_spec_verify_base {
     constexpr void verify(const std_format_spec_base& spec) const {
         do {
-            if (spec.type == type_t::c) {
+            if (spec.has_precision())
+                break;
+            if (spec.type == type_t::c || (AllowS && spec.type == type_t::s)) {
                 if (spec.sign != sign_t::none)
                     break;
                 if (spec.alternate)
@@ -1355,7 +1358,7 @@ struct char_default_engine {
     }
 };
 
-struct char_spec_delegate : integral_spec_verify_base {
+struct char_spec_delegate : integral_spec_verify_base<> {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         if (is_defaulted(spec.type)) {
             spec.type = type_t::c;
@@ -1399,11 +1402,12 @@ struct bool_default_engine {
     constexpr std::size_t value_width() const noexcept { return b ? 4 : 5; }
 };
 
-struct bool_spec_delegate {
+struct bool_spec_delegate : integral_spec_verify_base<true> {
     constexpr void set_defaults(std_format_spec_base& spec) const noexcept {
         if (is_defaulted(spec.type)) {
             spec.type = type_t::s;
-        } else if (spec.type != type_t::s && spec.sign == sign_t::none) {
+        } else if (spec.type != type_t::s && spec.type != type_t::c &&
+                   spec.sign == sign_t::none) {
             spec.sign = sign_t::minus;
         }
         if (is_defaulted(spec.align)) {
@@ -1412,12 +1416,6 @@ struct bool_spec_delegate {
         } else {
             spec.zero_pad = false;
         }
-    }
-    constexpr void verify(const std_format_spec_base& spec) const {
-        if (spec.type != type_t::s && spec.type != type_t::c &&
-            !is_integer_type(spec.type))
-            throw_format_error("invalid format spec for bool");
-        // TODO
     }
 };
 
@@ -1564,7 +1562,7 @@ struct integer_spec_engine_base : integer_spec_engine_common {
     }
 };
 
-struct integer_spec_delegate : integral_spec_verify_base {
+struct integer_spec_delegate : integral_spec_verify_base<> {
     constexpr void set_defaults(std_format_spec_base& spec) noexcept {
         if (is_defaulted(spec.align)) {
             spec.align = alignment_t::right;
