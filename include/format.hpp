@@ -817,43 +817,6 @@ struct arg_id_t {
     }
 };
 
-struct integer_or_arg_id {
-    union {
-        std::size_t integer;
-        arg_id_t arg_id;
-    };
-    enum class which : char { integer, arg_id } tag;
-    constexpr integer_or_arg_id(std::size_t i = 0)
-        : integer{i}, tag{which::integer} {}
-    constexpr integer_or_arg_id(arg_id_t arg)
-        : arg_id{arg}, tag{which::arg_id} {}
-
-    template <class Out, class CharT>
-    void get_integer(basic_format_context<Out, CharT>& context) {
-        if (tag == which::arg_id) {
-            integer = visit_format_arg(get_integer_func{},
-                                       context.arg(this->arg_id._id));
-            tag = which::integer;
-        }
-    }
-
-   private:
-    struct get_integer_func {
-        std::size_t operator()(...) const noexcept(false) {
-            throw_format_error("argument must be an integral type");
-        }
-        template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
-        std::size_t operator()(Int i) const noexcept(false) {
-            if constexpr (std::is_signed_v<Int>) {
-                if (i < 0) {
-                    throw_format_error("invalid argument");
-                }
-            }
-            return static_cast<std::size_t>(i);
-        }
-    };
-};
-
 enum class alignment_t : char {
     defaulted,
     left,
@@ -896,17 +859,83 @@ inline /*constexpr*/ bool is_integer_type(type_t t) noexcept {
                      static_cast<char>(t)) != integer_types.end();
 }
 
+union integer_or_arg_id {
+    std::monostate _;
+    std::size_t integer;
+    arg_id_t arg_id;
+
+    constexpr integer_or_arg_id() noexcept : _{} {}
+    constexpr integer_or_arg_id(std::size_t i) noexcept : integer{i} {}
+    constexpr integer_or_arg_id(arg_id_t a) noexcept : arg_id{a} {}
+
+    template <class Out, class CharT>
+    void set_integer(basic_format_context<Out, CharT>& context) {
+        integer = visit_format_arg(get_integer_func{},
+                                   context.arg(this->arg_id._id));
+    }
+
+   private:
+    struct get_integer_func {
+        std::size_t operator()(...) const noexcept(false) {
+            throw_format_error("argument must be an integral type");
+        }
+        template <class Int, class = std::enable_if_t<std::is_integral_v<Int>>>
+        std::size_t operator()(Int i) const noexcept(false) {
+            if constexpr (std::is_signed_v<Int>) {
+                if (i < 0) {
+                    throw_format_error("invalid argument");
+                }
+            }
+            return static_cast<std::size_t>(i);
+        }
+    };
+};
+enum class integer_or_arg_id_tag : char { integer, arg_id };
+
+struct opt_integer_or_arg_id {
+    union {
+        std::monostate _;
+        integer_or_arg_id i;
+    };
+    integer_or_arg_id_tag tag;
+    bool engaged;
+    constexpr opt_integer_or_arg_id(std::nullopt_t = std::nullopt) noexcept
+        : _{}, tag{}, engaged{false} {}
+    constexpr opt_integer_or_arg_id(std::size_t i) noexcept
+        : i{i}, tag{integer_or_arg_id_tag::integer}, engaged{true} {}
+    constexpr opt_integer_or_arg_id(arg_id_t a) noexcept
+        : i{a}, tag{integer_or_arg_id_tag::arg_id}, engaged{true} {}
+    constexpr explicit operator bool() const noexcept { return engaged; }
+};
+
 struct std_format_spec_base {
+    integer_or_arg_id width;
+    integer_or_arg_id precision{std::numeric_limits<std::size_t>::max()};
+    integer_or_arg_id_tag width_tag;
+    integer_or_arg_id_tag precision_tag{integer_or_arg_id_tag::integer};
     alignment_t align{alignment_t::defaulted};
     bool alternate = false;
     sign_t sign;
     bool zero_pad;
-    integer_or_arg_id width;
-    integer_or_arg_id precision{std::numeric_limits<std::size_t>::max()};
     type_t type{type_t::defaulted};
 
+    template <class Context>
+    void set_width(Context& c) {
+        if (width_tag == integer_or_arg_id_tag::arg_id) {
+            width.set_integer(c);
+            width_tag = integer_or_arg_id_tag::integer;
+        }
+    }
+    template <class Context>
+    void set_precision(Context& c) {
+        if (precision_tag == integer_or_arg_id_tag::arg_id) {
+            precision.set_integer(c);
+            precision_tag = integer_or_arg_id_tag::integer;
+        }
+    }
+
     constexpr bool has_precision() const noexcept {
-        return !(precision.tag == integer_or_arg_id::which::integer &&
+        return !(precision_tag == integer_or_arg_id_tag::integer &&
                  precision.integer == std::numeric_limits<std::size_t>::max());
     }
 };
@@ -935,7 +964,8 @@ struct std_spec_parser {
         }
         spec.zero_pad = fmt.consume('0');
         if (const auto width = parse_integer_or_arg_id<false>(fmt)) {
-            spec.width = *width;
+            spec.width = width.i;
+            spec.width_tag = width.tag;
         }
         parse_precision();
         parse_type();
@@ -987,7 +1017,7 @@ struct std_spec_parser {
             spec.sign = sign_t::none;
     }
 
-    constexpr std::optional<integer_or_arg_id> parse_integer_or_arg_id_impl(
+    constexpr opt_integer_or_arg_id parse_integer_or_arg_id_impl(
           range<CharT>& s) {
         if (s.match('{')) {
             auto next = s.substr(1);
@@ -1008,8 +1038,7 @@ struct std_spec_parser {
     }
 
     template <bool AllowLeadingZero>
-    constexpr std::optional<integer_or_arg_id> parse_integer_or_arg_id(
-          range<CharT>& s) {
+    constexpr opt_integer_or_arg_id parse_integer_or_arg_id(range<CharT>& s) {
         if constexpr (!AllowLeadingZero) {
             if (s.match('0'))
                 return std::nullopt;
@@ -1021,7 +1050,8 @@ struct std_spec_parser {
         if (fmt.match('.')) {
             auto next = fmt.substr(1);
             if (auto result = parse_integer_or_arg_id<true>(next)) {
-                spec.precision = *result;
+                spec.precision = result.i;
+                spec.precision_tag = result.tag;
                 fmt = next;
             }
         }
@@ -1212,8 +1242,8 @@ struct std_formatter_driver {
     template <class Context, class SpecDelegate>
     constexpr void finalize_spec(Context& fc, SpecDelegate&& spec_delegate) {
         LRSTD_ASSERT(spec.has_value());
-        spec->width.get_integer(fc);
-        spec->precision.get_integer(fc);
+        spec->set_width(fc);
+        spec->set_precision(fc);
         finalize_spec_impl(std::forward<SpecDelegate>(spec_delegate));
     }
 
@@ -1222,7 +1252,6 @@ struct std_formatter_driver {
                                  FormatEngine&& engine) {
         LRSTD_ASSERT(spec.has_value());
         Out out = fc.out();
-        spec->width.get_integer(fc);
         out = engine.write_left_padding(spec->width.integer, spec->align,
                                         spec->fill, out);
         out = engine.write_value(out);
@@ -1960,7 +1989,7 @@ struct str_spec_engine : str_default_engine<CharT, Traits> {
     constexpr str_spec_engine(std::basic_string_view<CharT, Traits> str,
                               const std_format_spec_base& spec) noexcept
         : base{str.substr(0, spec.precision.integer)} {
-        LRSTD_ASSERT(spec.precision.tag == integer_or_arg_id::which::integer);
+        LRSTD_ASSERT(spec.precision_tag == integer_or_arg_id_tag::integer);
     }
 
     template <class Out>
