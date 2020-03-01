@@ -881,17 +881,6 @@ struct std_format_spec : std_format_spec_base {
 };
 
 template <class CharT>
-struct type_chars;
-template <>
-struct type_chars<char> {
-    static constexpr const std::string_view value = "aAbBcdeEfFgGnopsxX";
-};
-template <>
-struct type_chars<wchar_t> {
-    static constexpr const std::wstring_view value = L"aAbBcdeEfFgGnopsxX";
-};
-
-template <class CharT>
 struct std_spec_parser {
     constexpr std_spec_parser(basic_format_parse_context<CharT>& parse_context,
                               std_format_spec<CharT>& spec) noexcept
@@ -1000,12 +989,20 @@ struct std_spec_parser {
         }
     }
 
-    constexpr void parse_type() {
-        for (CharT c : type_chars<CharT>::value) {
-            if (fmt.consume(c)) {
-                spec.type = type_t(c);
-            }
+    constexpr CharT consume_type_char() {
+        if (fmt.empty())
+            return '\0';
+        constexpr const char* type_chars = "aAbBcdeEfFgGnopsxX";
+        const char* end = type_chars + std::strlen(type_chars);
+        const auto t = std::find(type_chars, end, fmt[0]);
+        if (t != end) {
+            fmt.remove_prefix(1);
         }
+        return *t;
+    }
+    constexpr void parse_type() {
+        if (const CharT type = consume_type_char())
+            spec.type = type_t(type);
     }
 
     static constexpr range<CharT> make_range(
