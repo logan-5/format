@@ -21,6 +21,7 @@ set(source_files
     formatted_size.cpp 
     hello_world.cpp 
     invalid.cpp
+    locale.cpp
     make_format_args.cpp 
     output.cpp 
     representable_as_char.cpp 

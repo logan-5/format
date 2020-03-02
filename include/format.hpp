@@ -8,6 +8,7 @@
 #include <climits>
 #include <cstring>
 #include <functional>
+#include <locale>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -164,6 +165,15 @@ template <class CharT, class Out>
 LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
                                           basic_string_view<CharT> fmt,
                                           format_args_t<Out, CharT>& args);
+template <class CharT, class Out>
+LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
+                                          const std::locale&,
+                                          basic_string_view<CharT> fmt,
+                                          format_args_t<Out, CharT>& args);
+template <class CharT, class Out>
+LRSTD_EXTRA_CONSTEXPR Out
+vformat_to_core(basic_format_context<Out, CharT>& context,
+                basic_string_view<CharT> fmt_sv);
 }  // namespace detail
 
 template <class CharT>
@@ -185,9 +195,8 @@ class basic_format_parse_context {
 
     template <class C, class O>
     friend LRSTD_EXTRA_CONSTEXPR O
-    detail::vformat_to_impl(O out,
-                            basic_string_view<C> fmt,
-                            format_args_t<O, C>& args);
+    detail::vformat_to_core(basic_format_context<O, C>& context,
+                            basic_string_view<C> fmt_sv);
 
    public:
     explicit constexpr basic_format_parse_context(basic_string_view<CharT> fmt,
@@ -700,17 +709,34 @@ template <class Out, class CharT>
 class basic_format_context {
     basic_format_args<basic_format_context> _args;
     Out _out;
+    std::optional<std::locale> _locale;
 
     LRSTD_EXTRA_CONSTEXPR basic_format_context(
           const basic_format_args<basic_format_context>& args,
           Out out)
         : _args{args}, _out{out} {}
+    LRSTD_EXTRA_CONSTEXPR basic_format_context(
+          const basic_format_args<basic_format_context>& args,
+          Out out,
+          const std::locale& loc)
+        : _args{args}, _out{out}, _locale{loc} {}
 
+    template <class C, class O>
+    friend LRSTD_EXTRA_CONSTEXPR O
+    detail::vformat_to_impl(O out,
+                            const std::locale&,
+                            basic_string_view<C> fmt,
+                            format_args_t<O, C>& args);
     template <class C, class O>
     friend LRSTD_EXTRA_CONSTEXPR O
     detail::vformat_to_impl(O out,
                             basic_string_view<C> fmt,
                             format_args_t<O, C>& args);
+
+    template <class C, class O>
+    friend LRSTD_EXTRA_CONSTEXPR O
+    detail::vformat_to_core(basic_format_context<O, C>& context,
+                            basic_string_view<C> fmt_sv);
 
     constexpr std::size_t args_size() const { return _args._size; }
 
@@ -724,6 +750,8 @@ class basic_format_context {
           std::size_t id_) const {
         return _args.get(id_);
     }
+
+    std::locale locale() { return _locale ? *_locale : std::locale(); }
 
     LRSTD_EXTRA_CONSTEXPR iterator out() noexcept { return _out; }
     LRSTD_EXTRA_CONSTEXPR void advance_to(iterator it) { _out = it; }
@@ -2318,10 +2346,9 @@ constexpr void arg_out(Context& fc,
 }
 
 template <class CharT, class Out>
-LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
-                                          basic_string_view<CharT> fmt_sv,
-                                          format_args_t<Out, CharT>& args) {
-    basic_format_context<Out, CharT> context(args, out);
+LRSTD_EXTRA_CONSTEXPR Out
+vformat_to_core(basic_format_context<Out, CharT>& context,
+                basic_string_view<CharT> fmt_sv) {
     basic_format_parse_context<CharT> parse_context(fmt_sv,
                                                     context.args_size());
 
@@ -2352,17 +2379,59 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
     return context.out();
 }
 
+template <class CharT, class Out>
+LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
+                                          const std::locale& loc,
+                                          basic_string_view<CharT> fmt_sv,
+                                          format_args_t<Out, CharT>& args) {
+    basic_format_context<Out, CharT> context(args, out, loc);
+    return lrstd::detail::vformat_to_core(context, fmt_sv);
+}
+template <class CharT, class Out>
+LRSTD_EXTRA_CONSTEXPR Out vformat_to_impl(Out out,
+                                          basic_string_view<CharT> fmt_sv,
+                                          format_args_t<Out, CharT>& args) {
+    basic_format_context<Out, CharT> context(args, out);
+    return lrstd::detail::vformat_to_core(context, fmt_sv);
+}
+
+template <class CharT>
+LRSTD_EXTRA_CONSTEXPR std::basic_string<CharT> vformat_impl(
+      const std::locale& loc,
+      basic_string_view<CharT> fmt,
+      format_args_t<std::back_insert_iterator<std::basic_string<CharT>>, CharT>
+            args) {
+    std::basic_string<CharT> ret;
+    lrstd::detail::vformat_to_impl(std::back_inserter(ret), loc, fmt, args);
+    return ret;
+}
 template <class CharT>
 LRSTD_EXTRA_CONSTEXPR std::basic_string<CharT> vformat_impl(
       basic_string_view<CharT> fmt,
       format_args_t<std::back_insert_iterator<std::basic_string<CharT>>, CharT>
             args) {
     std::basic_string<CharT> ret;
-    vformat_to_impl(std::back_inserter(ret), fmt, args);
+    lrstd::detail::vformat_to_impl(std::back_inserter(ret), fmt, args);
     return ret;
 }
 
 }  // namespace detail
+
+template <class Out>
+LRSTD_EXTRA_CONSTEXPR Out vformat_to(Out out,
+                                     const std::locale& loc,
+                                     std::string_view fmt,
+                                     format_args_t<Out, char> args) {
+    return detail::vformat_to_impl(out, loc, fmt, args);
+}
+
+template <class Out>
+LRSTD_EXTRA_CONSTEXPR Out vformat_to(Out out,
+                                     const std::locale& loc,
+                                     std::wstring_view fmt,
+                                     format_args_t<Out, wchar_t> args) {
+    return detail::vformat_to_impl(out, loc, fmt, args);
+}
 
 template <class Out>
 LRSTD_EXTRA_CONSTEXPR Out vformat_to(Out out,
@@ -2380,10 +2449,30 @@ LRSTD_EXTRA_CONSTEXPR Out vformat_to(Out out,
 
 template <class Out, class... Args>
 LRSTD_EXTRA_CONSTEXPR Out format_to(Out out,
+                                    const std::locale& loc,
                                     std::string_view fmt,
                                     const Args&... args) {
     using Context = basic_format_context<Out, std::string_view::value_type>;
-    return vformat_to(out, fmt, {make_format_args<Context>(args...)});
+    return lrstd::vformat_to(out, loc, fmt,
+                             {make_format_args<Context>(args...)});
+}
+
+template <class Out, class... Args>
+LRSTD_EXTRA_CONSTEXPR Out format_to(Out out,
+                                    const std::locale& loc,
+                                    std::wstring_view fmt,
+                                    const Args&... args) {
+    using Context = basic_format_context<Out, std::wstring_view::value_type>;
+    return lrstd::vformat_to(out, loc, fmt,
+                             {make_format_args<Context>(args...)});
+}
+
+template <class Out, class... Args>
+LRSTD_EXTRA_CONSTEXPR Out format_to(Out out,
+                                    std::string_view fmt,
+                                    const Args&... args) {
+    using Context = basic_format_context<Out, std::string_view::value_type>;
+    return lrstd::vformat_to(out, fmt, {make_format_args<Context>(args...)});
 }
 
 template <class Out, class... Args>
@@ -2391,9 +2480,19 @@ LRSTD_EXTRA_CONSTEXPR Out format_to(Out out,
                                     std::wstring_view fmt,
                                     const Args&... args) {
     using Context = basic_format_context<Out, std::wstring_view::value_type>;
-    return vformat_to(out, fmt, {make_format_args<Context>(args...)});
+    return lrstd::vformat_to(out, fmt, {make_format_args<Context>(args...)});
 }
 
+inline std::string vformat(const std::locale& loc,
+                           std::string_view fmt,
+                           format_args args) {
+    return detail::vformat_impl(loc, fmt, args);
+}
+inline std::wstring vformat(const std::locale& loc,
+                            std::wstring_view fmt,
+                            wformat_args args) {
+    return detail::vformat_impl(loc, fmt, args);
+}
 inline std::string vformat(std::string_view fmt, format_args args) {
     return detail::vformat_impl(fmt, args);
 }
@@ -2402,13 +2501,49 @@ inline std::wstring vformat(std::wstring_view fmt, wformat_args args) {
 }
 
 template <class... Args>
+std::string format(const std::locale& loc,
+                   std::string_view fmt,
+                   const Args&... args) {
+    return lrstd::vformat(loc, fmt, {make_format_args(args...)});
+}
+
+template <class... Args>
+std::wstring format(const std::locale& loc,
+                    std::wstring_view fmt,
+                    const Args&... args) {
+    return lrstd::vformat(loc, fmt, {make_wformat_args(args...)});
+}
+
+template <class... Args>
 std::string format(std::string_view fmt, const Args&... args) {
-    return vformat(fmt, {make_format_args(args...)});
+    return lrstd::vformat(fmt, {make_format_args(args...)});
 }
 
 template <class... Args>
 std::wstring format(std::wstring_view fmt, const Args&... args) {
-    return vformat(fmt, {make_wformat_args(args...)});
+    return lrstd::vformat(fmt, {make_wformat_args(args...)});
+}
+
+template <class... Args>
+LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(const std::locale& loc,
+                                                 std::string_view fmt,
+                                                 const Args&... args) {
+    using Context = basic_format_context<detail::char_counter,
+                                         std::string_view::value_type>;
+    return lrstd::vformat_to(detail::char_counter{}, loc, fmt,
+                             {make_format_args<Context>(args...)})
+          .count;
+}
+
+template <class... Args>
+LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(const std::locale& loc,
+                                                 std::wstring_view fmt,
+                                                 const Args&... args) {
+    using Context = basic_format_context<detail::char_counter,
+                                         std::wstring_view::value_type>;
+    return lrstd::vformat_to(detail::char_counter{}, loc, fmt,
+                             {make_format_args<Context>(args...)})
+          .count;
 }
 
 template <class... Args>
@@ -2416,8 +2551,8 @@ LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(std::string_view fmt,
                                                  const Args&... args) {
     using Context = basic_format_context<detail::char_counter,
                                          std::string_view::value_type>;
-    return vformat_to(detail::char_counter{}, fmt,
-                      {make_format_args<Context>(args...)})
+    return lrstd::vformat_to(detail::char_counter{}, fmt,
+                             {make_format_args<Context>(args...)})
           .count;
 }
 
@@ -2426,8 +2561,8 @@ LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(std::wstring_view fmt,
                                                  const Args&... args) {
     using Context = basic_format_context<detail::char_counter,
                                          std::wstring_view::value_type>;
-    return vformat_to(detail::char_counter{}, fmt,
-                      {make_format_args<Context>(args...)})
+    return lrstd::vformat_to(detail::char_counter{}, fmt,
+                             {make_format_args<Context>(args...)})
           .count;
 }
 
@@ -2441,9 +2576,34 @@ template <class Out, class... Args>
 LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
       Out out,
       iter_difference_t<Out> n,
+      const std::locale& loc,
       std::string_view fmt,
       const Args&... args) {
-    auto result = format_to(detail::write_n_wrapper<Out>{n, out}, fmt, args...);
+    auto result = lrstd::format_to(detail::write_n_wrapper<Out>{n, out}, loc,
+                                   fmt, args...);
+    return format_to_n_result<Out>{result.it, result.current + result.overflow};
+}
+
+template <class Out, class... Args>
+LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
+      Out out,
+      iter_difference_t<Out> n,
+      const std::locale& loc,
+      std::wstring_view fmt,
+      const Args&... args) {
+    auto result = lrstd::format_to(detail::write_n_wrapper<Out>{n, out}, loc,
+                                   fmt, args...);
+    return format_to_n_result<Out>{result.it, result.current + result.overflow};
+}
+
+template <class Out, class... Args>
+LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
+      Out out,
+      iter_difference_t<Out> n,
+      std::string_view fmt,
+      const Args&... args) {
+    auto result =
+          lrstd::format_to(detail::write_n_wrapper<Out>{n, out}, fmt, args...);
     return format_to_n_result<Out>{result.it, result.current + result.overflow};
 }
 
@@ -2453,7 +2613,8 @@ LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
       iter_difference_t<Out> n,
       std::wstring_view fmt,
       const Args&... args) {
-    auto result = format_to(detail::write_n_wrapper<Out>{n, out}, fmt, args...);
+    auto result =
+          lrstd::format_to(detail::write_n_wrapper<Out>{n, out}, fmt, args...);
     return format_to_n_result<Out>{result.it, result.current + result.overflow};
 }
 
