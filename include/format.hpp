@@ -1616,22 +1616,79 @@ struct bool_spec_delegate : integral_spec_verifier<true> {
 };
 
 template <class CharT>
-struct bool_spec_engine : bool_default_engine {
+struct bool_locale_writer {
+    std::basic_string<CharT> name;
+
+    static std::optional<bool_locale_writer> try_create(const std::locale& loc,
+                                                        bool b) {
+        std::optional<bool_locale_writer> ret;
+        using Facet = std::numpunct<CharT>;
+        if (std::has_facet<Facet>(loc)) {
+            ret.emplace(std::use_facet<Facet>(loc), b, access{});
+        }
+        return ret;
+    }
+    template <class Writer, class Out>
+    Out write(Writer writer, Out out) const {
+        return writer(std::basic_string_view<CharT>(name), out);
+    }
+    std::size_t value_width() const noexcept { return name.size(); }
+
+   private:
+    struct access {};
+
+   public:
+    bool_locale_writer(const std::numpunct<CharT>& np, bool b, access)
+        : name{b ? np.truename() : np.falsename()} {}
+};
+
+template <class CharT>
+struct bool_locale_engine_base : bool_default_engine {
+    using base = bool_default_engine;
+    std::optional<bool_locale_writer<CharT>> locale_writer;
+
+    template <class Context>
+    bool_locale_engine_base(bool b,
+                            const std_format_spec_base& spec,
+                            Context& context)
+        : base{b}
+        , locale_writer{spec.use_locale ? bool_locale_writer<CharT>::try_create(
+                                                context.locale(),
+                                                b)
+                                        : std::nullopt} {}
+
+    template <class Out>
+    constexpr Out write_value(Out out) const {
+        return locale_writer
+                     ? locale_writer->write(nonoverlapping_str_writer{}, out)
+                     : base::write_value(out);
+    }
+    constexpr std::size_t value_width() const noexcept {
+        return locale_writer ? locale_writer->value_width()
+                             : base::value_width();
+    }
+};
+
+template <class CharT>
+struct bool_spec_engine : bool_locale_engine_base<CharT> {
+    using base = bool_locale_engine_base<CharT>;
+    using base::base;
+
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
                                      alignment_t align,
                                      CharT fill,
                                      Out out) const {
-        return simple_padding_engine{align}.write_left(width, value_width(),
-                                                       fill, out);
+        return simple_padding_engine{align}.write_left(
+              width, base::value_width(), fill, out);
     }
     template <class Out>
     constexpr Out write_right_padding(std::size_t width,
                                       alignment_t align,
                                       CharT fill,
                                       Out out) const {
-        return simple_padding_engine{align}.write_right(width, value_width(),
-                                                        fill, out);
+        return simple_padding_engine{align}.write_right(
+              width, base::value_width(), fill, out);
     }
 };
 
@@ -1982,7 +2039,8 @@ struct int_formatter_base : public std_formatter_driver<CharT> {
                       fc, char_spec_engine<CharT>{{static_cast<CharT>(i)}});
             case T::s:
                 return base::format_to_spec(
-                      fc, bool_spec_engine<CharT>{{static_cast<bool>(i)}});
+                      fc, bool_spec_engine<CharT>{static_cast<bool>(i),
+                                                  *base::spec, fc});
             default:
                 break;
         }

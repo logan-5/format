@@ -260,3 +260,54 @@ TEMPLATE_TEST_CASE("int_cppreference_examples", "", char, wchar_t) {
               str("   18,446,744,073,709,551,61,5"));
     }
 }
+
+TEMPLATE_TEST_CASE("bool_cppreference_examples", "", char, wchar_t) {
+    using lrstd::format;
+    using charT = TestType;
+    str_fn<charT> str;
+
+    {
+        std::locale::global(std::locale("en_US"));
+        CHECK(format(str("{:L}"), true) == str("true"));
+        CHECK(format(str("{:L}"), true) == str("true"));
+    }
+    {
+        std::locale loc("C");
+        CHECK(format(loc, str("{:L}"), true) == str("true"));
+        CHECK(format(loc, str("{:L}"), false) == str("false"));
+    }
+    {
+        struct custom_tf : std::numpunct<charT> {
+            typename std::numpunct<charT>::string_type do_truename()
+                  const override {
+                return str_fn<charT>{}("t");
+            }
+            typename std::numpunct<charT>::string_type do_falsename()
+                  const override {
+                return str_fn<charT>{}("f");
+            }
+        };
+        std::locale loc(std::locale("C"), new custom_tf);
+        CHECK(format(loc, str("{:L}"), true) == str("t"));
+        CHECK(format(loc, str("{:L}"), false) == str("f"));
+        CHECK(format(loc, str("{:>5L}"), true) == str("    t"));
+        CHECK(format(loc, str("{:>5L}"), false) == str("    f"));
+    }
+    {
+        struct french_bool : std::numpunct<charT> {
+            typename std::numpunct<charT>::string_type do_truename()
+                  const override {
+                return str_fn<charT>{}("vrai");
+            }
+            typename std::numpunct<charT>::string_type do_falsename()
+                  const override {
+                return str_fn<charT>{}("faux");
+            }
+        };
+        std::locale loc(std::locale("C"), new french_bool);
+        CHECK(format(loc, str("{:L}"), true) == str("vrai"));
+        CHECK(format(loc, str("{:L}"), false) == str("faux"));
+        CHECK(format(loc, str("{:>5L}"), true) == str(" vrai"));
+        CHECK(format(loc, str("{:>5L}"), false) == str(" faux"));
+    }
+}
