@@ -526,6 +526,11 @@ struct basic_format_arg {
     detail::arg_storage<Context> value;
     detail::arg_tag tag;
 
+    LRSTD_EXTRA_CONSTEXPR explicit basic_format_arg(
+          detail::arg_storage<Context> value,
+          detail::arg_tag tag) noexcept
+        : value{value}, tag{tag} {}
+
     template <class T,
               class S = decltype(
                     detail::to_storage_type<Context>(std::declval<T>()))>
@@ -533,13 +538,15 @@ struct basic_format_arg {
         : value{detail::to_storage_type<Context>(t)}
         , tag{detail::tag_for<S>()} {}
 
-    template <class Ctx, class... Args>
-    friend LRSTD_EXTRA_CONSTEXPR detail::format_arg_store<Ctx, Args...>
-    make_format_args(const Args&...);
-
     template <class Visitor, class Ctx>
     friend LRSTD_EXTRA_CONSTEXPR auto visit_format_arg(Visitor&&,
                                                        basic_format_arg<Ctx>);
+
+    template <class C, class... Args>
+    friend struct detail::format_arg_store;
+
+    template <class C>
+    friend class basic_format_args;
 
    public:
     LRSTD_EXTRA_CONSTEXPR basic_format_arg() noexcept
@@ -593,20 +600,85 @@ LRSTD_EXTRA_CONSTEXPR auto visit_format_arg(Visitor&& visitor,
     LRSTD_UNREACHABLE();
 }
 namespace detail {
+inline constexpr std::size_t size_bit_count = sizeof(std::size_t) * CHAR_BIT;
+inline constexpr std::size_t small_bit = 1ull << (size_bit_count - 1ull);
+inline constexpr std::size_t tag_bit_count = 4ull;
+inline constexpr std::size_t small_arg_count =
+      sizeof(std::size_t) * CHAR_BIT / tag_bit_count;
+inline constexpr std::size_t tag_bit_mask = std::size_t(-1) >>
+                                            (size_bit_count - tag_bit_count);
+
+template <class Context, class T>
+constexpr std::size_t get_tag_bits() noexcept {
+    return static_cast<std::size_t>(
+          tag_for<decltype(to_storage_type<Context>(std::declval<T>()))>());
+}
+
+template <class Context, class... Args>
+constexpr std::size_t get_small_args_tags() {
+    static_assert(sizeof...(Args) <= small_arg_count);
+    std::size_t tags = small_bit;
+    std::size_t shift = 0;
+    ((tags |= (get_tag_bits<Context, Args>() << (shift++ * tag_bit_count))),
+     ...);
+    return tags;
+}
 
 template <class Context, class... Args>
 struct format_arg_store {
-    std::array<basic_format_arg<Context>, sizeof...(Args)> args;
+    static constexpr const std::size_t arg_count = sizeof...(Args);
+    static constexpr bool is_small = arg_count <= small_arg_count;
+
+    using storage_type = std::conditional_t<
+          is_small,
+          std::array<detail::arg_storage<Context>, arg_count>,
+          std::array<basic_format_arg<Context>, arg_count>>;
+    storage_type storage;
+
+    static constexpr std::size_t size_field() noexcept {
+        if constexpr (is_small)
+            return get_small_args_tags<Context, Args...>();
+        else
+            return arg_count;
+    }
+
+    constexpr explicit format_arg_store(const Args&... args)
+        : storage{typename storage_type::value_type(
+                to_storage_type<Context>(args))...} {}
 };
 }  // namespace detail
 
 template <class Context>
 class basic_format_args {
     std::size_t _size;
-    const basic_format_arg<Context>* _data;
+    const void* _data;
 
     template <class, class>
     friend class basic_format_context;
+
+    constexpr bool is_small() const noexcept {
+        return _size & detail::small_bit;
+    }
+
+    basic_format_arg<Context> get_small(std::size_t i) const noexcept {
+        if (i < detail::small_arg_count) {
+            const auto tag = static_cast<detail::arg_tag>(
+                  (_size >> (i * detail::tag_bit_count)) &
+                  detail::tag_bit_mask);
+            if (tag != detail::arg_tag::empty)
+                return basic_format_arg<Context>(
+                      reinterpret_cast<const detail::arg_storage<Context>*>(
+                            _data)[i],
+                      tag);
+        }
+        return basic_format_arg<Context>();
+    }
+
+    basic_format_arg<Context> get_large(std::size_t i) const noexcept {
+        return i < _size ? reinterpret_cast<const basic_format_arg<Context>*>(
+                                 _data)[i]
+                         : basic_format_arg<Context>();
+    }
 
    public:
     LRSTD_EXTRA_CONSTEXPR basic_format_args() noexcept
@@ -614,12 +686,12 @@ class basic_format_args {
 
     template <class... Args>
     LRSTD_EXTRA_CONSTEXPR basic_format_args(
-          const detail::format_arg_store<Context, Args...>& storage) noexcept
-        : _size{storage.args.size()}, _data{storage.args.data()} {}
+          const detail::format_arg_store<Context, Args...>& store) noexcept
+        : _size{store.size_field()}, _data{&store.storage} {}
 
     LRSTD_EXTRA_CONSTEXPR basic_format_arg<Context> get(std::size_t i) const
           noexcept {
-        return i < _size ? _data[i] : basic_format_arg<Context>();
+        return is_small() ? get_small(i) : get_large(i);
     }
 };
 
@@ -659,7 +731,7 @@ class basic_format_context {
 template <class Context = format_context, class... Args>
 LRSTD_EXTRA_CONSTEXPR detail::format_arg_store<Context, Args...>
 make_format_args(const Args&... args) {
-    return {basic_format_arg<Context>(args)...};
+    return detail::format_arg_store<Context, Args...>{args...};
 }
 
 template <class... Args>
