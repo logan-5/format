@@ -1064,6 +1064,7 @@ struct std_format_spec_base {
     bool alternate = false;
     sign_t sign;
     bool zero_pad;
+    bool use_locale;
     type_t type{type_t::defaulted};
 
     template <class Context>
@@ -1086,6 +1087,7 @@ struct std_format_spec_base {
                  precision.integer == std::numeric_limits<std::size_t>::max());
     }
 };
+
 template <class CharT>
 struct std_format_spec : std_format_spec_base {
     CharT fill{' '};
@@ -1115,6 +1117,7 @@ struct std_spec_parser {
             spec.width_tag = width.tag;
         }
         parse_precision();
+        spec.use_locale = fmt.consume('L');
         parse_type();
         parse_context.advance_to(fmt.begin());
     }
@@ -1505,9 +1508,13 @@ struct format_int_storage_type<bool> {
     using type = char;
 };
 
+template <bool IsBool = false>
 struct non_arithmetic_verifier {
     static constexpr void verify(const std_format_spec_base& spec) {
         do {
+            if constexpr (!IsBool)
+                if (spec.use_locale)
+                    break;
             if (spec.sign != sign_t::none)
                 break;
             if (spec.alternate)
@@ -1520,14 +1527,14 @@ struct non_arithmetic_verifier {
     }
 };
 
-template <bool AllowS = false>
+template <bool IsBool = false>
 struct integral_spec_verifier {
     static constexpr void verify(const std_format_spec_base& spec) {
         do {
             if (spec.has_precision())
                 break;
-            if (spec.type == type_t::c || (AllowS && spec.type == type_t::s))
-                non_arithmetic_verifier{}.verify(spec);
+            if (spec.type == type_t::c || (IsBool && spec.type == type_t::s))
+                non_arithmetic_verifier<IsBool>{}.verify(spec);
             else if (!is_integer_type(spec.type))
                 break;
             return;
@@ -2029,7 +2036,7 @@ struct ptr_spec_delegate {
     static constexpr void verify(const std_format_spec_base& spec) {
         if (spec.type != type_t::p)
             throw_format_error("invalid format type for pointer");
-        non_arithmetic_verifier{}.verify(spec);
+        non_arithmetic_verifier<>{}.verify(spec);
     }
 };
 
@@ -2116,7 +2123,7 @@ struct str_spec_delegate {
     static constexpr void verify(const std_format_spec_base& spec) {
         if (spec.type != type_t::s)
             throw_format_error("invalid type specifier for string");
-        non_arithmetic_verifier{}.verify(spec);
+        non_arithmetic_verifier<>{}.verify(spec);
     }
 };
 

@@ -66,6 +66,7 @@ TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
     {
         CHECK(format(str("{}"), (char)123) == str("{"));
         CHECK(format(str("{:d}"), (char)123) == str("123"));
+        CHECK(format(str("{}"), (unsigned char)123) == str("123"));
         CHECK(format(str("{}"), (short)12345) == str("12345"));
         CHECK(format(str("{}"), 12345) == str("12345"));
         CHECK(format(str("{}"), 12345u) == str("12345"));
@@ -73,6 +74,17 @@ TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
         CHECK(format(str("{}"), 12345lu) == str("12345"));
         CHECK(format(str("{}"), 12345ll) == str("12345"));
         CHECK(format(str("{}"), 12345llu) == str("12345"));
+    }
+    {
+        CHECK(format(str("{:Ld}"), (char)123) == str("123"));
+        CHECK(format(str("{:L}"), (unsigned char)123) == str("123"));
+        CHECK(format(str("{:L}"), (short)123) == str("123"));
+        CHECK(format(str("{:L}"), 123) == str("123"));
+        CHECK(format(str("{:L}"), 123u) == str("123"));
+        CHECK(format(str("{:L}"), 123l) == str("123"));
+        CHECK(format(str("{:L}"), 123lu) == str("123"));
+        CHECK(format(str("{:L}"), 123ll) == str("123"));
+        CHECK(format(str("{:L}"), 123llu) == str("123"));
     }
     {
         CHECK(format(str("{}"), nullptr) == str("0x0"));

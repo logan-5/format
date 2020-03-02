@@ -20,8 +20,8 @@ TEMPLATE_TEST_CASE("parse_errors", "", char, wchar_t) {
     using lrstd::format;
     str_fn<TestType> str;
 
-    for (auto& pattern :
-         {str("{:.}"), str("{:00}"), str("{:x0}"), str("{:x#}")}) {
+    for (auto& pattern : {str("{:.}"), str("{:00}"), str("{:x0}"), str("{:x#}"),
+                          str("{:LL}")}) {
         CHECK_THROWS_AS(format(pattern, 5), lrstd::format_error);
     }
 }
@@ -111,4 +111,9 @@ TEMPLATE_TEST_CASE("invalid_nonarthmetic_nongeneric", "", char, wchar_t) {
 
     CHECK_THROWS_AS(format(str("{:c}"), (void*)nullptr), lrstd::format_error);
     CHECK_THROWS_AS(format(str("{:s}"), (void*)nullptr), lrstd::format_error);
+
+    CHECK_THROWS_AS(format(str("{:L}"), str('x')), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:L}"), str("x")), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:L}"), (void*)nullptr), lrstd::format_error);
+    CHECK_NOTHROW(format(str("{:L}"), false));
 }
