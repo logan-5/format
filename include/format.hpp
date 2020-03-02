@@ -604,7 +604,7 @@ inline constexpr std::size_t size_bit_count = sizeof(std::size_t) * CHAR_BIT;
 inline constexpr std::size_t small_bit = 1ull << (size_bit_count - 1ull);
 inline constexpr std::size_t tag_bit_count = 4ull;
 inline constexpr std::size_t small_arg_count =
-      sizeof(std::size_t) * CHAR_BIT / tag_bit_count;
+      (sizeof(std::size_t) * CHAR_BIT - 1) / tag_bit_count;
 inline constexpr std::size_t tag_bit_mask = std::size_t(-1) >>
                                             (size_bit_count - tag_bit_count);
 

@@ -24,6 +24,7 @@ set(source_files
     make_format_args.cpp 
     output.cpp 
     representable_as_char.cpp 
+    small_args.cpp
     std_examples.cpp 
     test.cpp
 )
