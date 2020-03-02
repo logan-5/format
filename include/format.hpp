@@ -1174,6 +1174,7 @@ struct std_spec_parser {
             if (const parse_integer_result result = parse_integer(next)) {
                 if (next.consume('}')) {
                     s = next;
+                    parse_context.check_arg_id(result.integer);
                     return arg_id_t{result.integer};
                 }
             } else if (next.consume('}')) {

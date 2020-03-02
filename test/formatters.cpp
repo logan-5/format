@@ -147,4 +147,7 @@ TEMPLATE_TEST_CASE("dynamic_width", "[formatters]", char, wchar_t) {
     CHECK(format(str("{0:{1}}"), 1, 2) == str(" 1"));
     CHECK(format(str("{1:{1}}"), 1, 2) == str(" 2"));
     CHECK(format(str("{1:{0}}"), 1, 2) == str("2"));
+
+    CHECK_THROWS_AS(format(str("{0:{}}"), 1, 2), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:{1}}"), 1, 2), lrstd::format_error);
 }
