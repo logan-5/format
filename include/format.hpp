@@ -5,6 +5,7 @@
 #include <array>
 #include <cassert>
 #include <charconv>
+#include <climits>
 #include <cstring>
 #include <functional>
 #include <optional>
