@@ -18,6 +18,7 @@ set(source_files
     format_error.cpp
     format_to_n.cpp 
     formatters.cpp 
+    formatters_static.cpp 
     formatted_size.cpp 
     hello_world.cpp 
     invalid.cpp
@@ -29,6 +30,7 @@ set(source_files
     std_examples.cpp 
     test.cpp
 )
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wextra -pedantic -Wno-missing-field-initializers -Wconversion")
 add_executable(format_test ${source_files})
 target_link_libraries(format_test PUBLIC format)
