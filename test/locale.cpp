@@ -226,3 +226,37 @@ TEMPLATE_TEST_CASE("locale_formatted_size", "", char, wchar_t) {
               10);
     }
 }
+
+TEMPLATE_TEST_CASE("int_cppreference_examples", "", char, wchar_t) {
+    using lrstd::format;
+    using charT = TestType;
+    str_fn<charT> str;
+
+    struct space_out : std::numpunct<charT> {
+        charT do_thousands_sep() const override {
+            return ' ';
+        }  // separate with spaces
+        std::string do_grouping() const override {
+            return "\1";
+        }  // groups of 1 digit
+    };
+    {
+        std::locale loc(std::locale("C"), new space_out);
+        CHECK(format(loc, str("{:L}"), 12345678) == str("1 2 3 4 5 6 7 8"));
+        CHECK(format(loc, str("{:*^19L}"), 12345678) ==
+              str("**1 2 3 4 5 6 7 8**"));
+    }
+
+    struct g123 : std::numpunct<charT> {
+        std::string do_grouping() const override { return "\1\2\3"; }
+    };
+    {
+        std::locale loc(std::locale("C"), new g123);
+        CHECK(format(loc, str("{:L}"),
+                     std::numeric_limits<unsigned long long>::max()) ==
+              str("18,446,744,073,709,551,61,5"));
+        CHECK(format(loc, str("{:30L}"),
+                     std::numeric_limits<unsigned long long>::max()) ==
+              str("   18,446,744,073,709,551,61,5"));
+    }
+}

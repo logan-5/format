@@ -87,6 +87,15 @@ TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
         CHECK(format(str("{:L}"), 123llu) == str("123"));
     }
     {
+        std::locale::global(std::locale("en_US"));
+        CHECK(format(str("{:L}"), 12345) == str("12,345"));
+        CHECK(format(str("{:L}"), 12345u) == str("12,345"));
+        CHECK(format(str("{:L}"), 12345l) == str("12,345"));
+        CHECK(format(str("{:L}"), 12345lu) == str("12,345"));
+        CHECK(format(str("{:L}"), 12345ll) == str("12,345"));
+        CHECK(format(str("{:L}"), 12345llu) == str("12,345"));
+    }
+    {
         CHECK(format(str("{}"), nullptr) == str("0x0"));
         CHECK(format(str("{:p}"), nullptr) == str("0x0"));
 

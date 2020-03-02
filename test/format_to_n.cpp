@@ -74,4 +74,11 @@ TEMPLATE_TEST_CASE("format_to_n", "", char, wchar_t) {
         CHECK(chars == str("____a-a-"));
         CHECK(result.size == 13);
     }
+    {
+        std::basic_string<TestType> chars;
+        std::locale::global(std::locale("en_US"));
+        auto result = format_to_n(std::back_inserter(chars), 4, "{:L}", 1234);
+        CHECK(chars == str("1,23"));
+        CHECK(result.size == 5);
+    }
 }

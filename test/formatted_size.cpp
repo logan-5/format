@@ -68,10 +68,8 @@ TEMPLATE_TEST_CASE("formatted_size", "", char, wchar_t) {
         CHECK(formatted_size(str("{0:b} {0:d} {0:o} {0:x}"), 42) == 15);
         CHECK(formatted_size(str("{0:#x} {0:#X}"), 42) == 9);
 
-        // clang-format off
-        // TODO
-        // CHECK(format("{:L}", 1234) == "1,234");  // (depending on the locale)
-        // clang-format on
+        std::locale::global(std::locale("en_US"));
+        CHECK(formatted_size("{:L}", 1234) == 5);
     }
     { CHECK(formatted_size(str("{}"), red) == 3); }
     { CHECK(formatted_size(str("{0:{1}}"), S{42}, 10) == 10); }

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <functional>
 #include <locale>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -1741,6 +1742,10 @@ struct integer_spec_engine_base : integer_spec_engine_common {
     char* buf_ptr;
     std::size_t buf_size;
 
+    std::string_view buf_str() const noexcept {
+        return std::string_view(this->buf_ptr, this->buf_size);
+    }
+
    public:
     integer_spec_engine_base(Int i, const std_format_spec_base& spec)
         : i{i}
@@ -1773,11 +1778,112 @@ struct integer_spec_delegate : integral_spec_verifier<> {
     }
 };
 
+template <class CharT>
+struct integer_locale_writer {
+    CharT thousands_sep;
+    std::string grouping;
+
+    static std::optional<integer_locale_writer> try_create(
+          const std::locale& loc) {
+        std::optional<integer_locale_writer> ret;
+        using Facet = std::numpunct<CharT>;
+        if (std::has_facet<Facet>(loc)) {
+            ret.emplace(std::use_facet<Facet>(loc), access{});
+        }
+        return ret;
+    }
+
+    template <class GenericWriter, class Out>
+    Out write(std::string_view str, GenericWriter writer, Out out) const {
+        if (grouping.empty())
+            return writer(str, out);
+        auto grouping_it = std::prev(grouping.end());
+        while (true) {
+            const auto group_size = static_cast<std::size_t>(*grouping_it);
+            const auto remaining_size =
+                  std::max(group_size, str.size()) - group_size;
+            const auto remaining_groups_total =
+                  std::accumulate(grouping.begin(), grouping_it, 0ull);
+            if (remaining_groups_total > remaining_size) {
+                --grouping_it;
+                continue;
+            }
+            const auto chunk_remainder =
+                  (remaining_size - remaining_groups_total) % group_size;
+            const auto chunk_size =
+                  chunk_remainder + (chunk_remainder == 0) * group_size;
+            const auto chunk = str.substr(0, chunk_size);
+
+            out = writer(chunk, out);
+            str.remove_prefix(chunk.size());
+            if (str.empty()) {
+                return out;
+            }
+            out = writer(thousands_sep, out);
+        }
+    }
+
+    std::size_t get_localized_size(std::string_view str) const {
+        std::size_t size = str.size();
+        if (grouping.empty())
+            return size;
+        auto grouping_it = grouping.begin();
+        while (true) {
+            const auto group_count = static_cast<std::size_t>(*grouping_it);
+            const auto chunk = str.substr(0, group_count);
+            str.remove_prefix(chunk.size());
+            if (str.empty()) {
+                return size;
+            }
+            ++size;
+            if (auto next_grouping = std::next(grouping_it);
+                next_grouping != grouping.end())
+                grouping_it = next_grouping;
+        }
+    }
+
+   private:
+    struct access {};
+
+   public:
+    explicit integer_locale_writer(const std::numpunct<CharT>& np, access)
+        : thousands_sep{np.thousands_sep()}, grouping{np.grouping()} {}
+};
+
 template <class Int, class CharT>
-struct integer_simple_spec_engine : integer_spec_engine_base<Int> {
+struct integer_locale_engine_base : integer_spec_engine_base<Int> {
     using base = integer_spec_engine_base<Int>;
 
-    std::size_t value_width() const noexcept { return base::buf_size; }
+    std::optional<integer_locale_writer<CharT>> locale_writer;
+
+    template <class Context>
+    integer_locale_engine_base(Int i,
+                               const std_format_spec_base& spec,
+                               Context& context)
+        : base{i, spec}
+        , locale_writer{spec.use_locale
+                              ? integer_locale_writer<CharT>::try_create(
+                                      context.locale())
+                              : std::nullopt} {}
+
+    std::size_t value_width() const noexcept {
+        return locale_writer
+                     ? locale_writer->get_localized_size(base::buf_str())
+                     : base::buf_size;
+    }
+
+    template <class Out, class Writer>
+    constexpr Out write_localized_value(Out out, Writer writer) const {
+        return this->locale_writer
+                     ? this->locale_writer->write(base::buf_str(), writer, out)
+                     : writer(base::buf_str(), out);
+    }
+};
+
+template <class Int, class CharT>
+struct integer_simple_spec_engine : integer_locale_engine_base<Int, CharT> {
+    using base = integer_locale_engine_base<Int, CharT>;
+    using base::base;
 
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
@@ -1786,7 +1892,8 @@ struct integer_simple_spec_engine : integer_spec_engine_base<Int> {
                                      Out out) const {
         return simple_padding_engine{align}.write_left(
               width,
-              value_width() + base::prefix.size() + (base::sign_char != '\0'),
+              base::value_width() + base::prefix.size() +
+                    (base::sign_char != '\0'),
               fill, out);
     }
     template <class Out>
@@ -1796,7 +1903,8 @@ struct integer_simple_spec_engine : integer_spec_engine_base<Int> {
                                       Out out) const {
         return simple_padding_engine{align}.write_right(
               width,
-              value_width() + base::prefix.size() + (base::sign_char != '\0'),
+              base::value_width() + base::prefix.size() +
+                    (base::sign_char != '\0'),
               fill, out);
     }
     template <class Out>
@@ -1806,14 +1914,13 @@ struct integer_simple_spec_engine : integer_spec_engine_base<Int> {
             out = writer(base::sign_char, out);
         if (!base::prefix.empty())
             out = writer(base::prefix, out);
-        return writer(std::string_view(base::buf_ptr, base::buf_size), out);
+        return base::write_localized_value(out, writer);
     }
 };
 template <class Int, class CharT>
-struct integer_zero_pad_spec_engine : integer_spec_engine_base<Int> {
-    using base = integer_spec_engine_base<Int>;
-
-    std::size_t value_width() const noexcept { return base::buf_size; }
+struct integer_zero_pad_spec_engine : integer_locale_engine_base<Int, CharT> {
+    using base = integer_locale_engine_base<Int, CharT>;
+    using base::base;
 
     template <class Out>
     constexpr Out write_left_padding(std::size_t width,
@@ -1821,7 +1928,7 @@ struct integer_zero_pad_spec_engine : integer_spec_engine_base<Int> {
                                      CharT,
                                      Out out) const {
         return zero_padding_engine{}.write_left(
-              width, value_width(), base::prefix, base::sign_char, out);
+              width, base::value_width(), base::prefix, base::sign_char, out);
     }
     template <class Out>
     static constexpr Out write_right_padding(std::size_t,
@@ -1832,8 +1939,8 @@ struct integer_zero_pad_spec_engine : integer_spec_engine_base<Int> {
     }
     template <class Out>
     constexpr Out write_value(Out out) const {
-        return nonoverlapping_str_writer{}(
-              std::string_view(base::buf_ptr, base::buf_size), out);
+        return base::write_localized_value(out,
+                                           nonoverlapping_generic_writer{});
     }
 };
 
@@ -1882,9 +1989,9 @@ struct int_formatter_base : public std_formatter_driver<CharT> {
         if (base::spec->zero_pad)
             return base::format_to_spec(
                   fc,
-                  integer_zero_pad_spec_engine<Int, CharT>{{i, *base::spec}});
+                  integer_zero_pad_spec_engine<Int, CharT>{i, *base::spec, fc});
         return base::format_to_spec(
-              fc, integer_simple_spec_engine<Int, CharT>{{i, *base::spec}});
+              fc, integer_simple_spec_engine<Int, CharT>{i, *base::spec, fc});
     }
 };
 

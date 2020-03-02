@@ -59,10 +59,8 @@ TEMPLATE_TEST_CASE("std_examples", "", char, wchar_t) {
               str("101010 42 52 2a"));
         CHECK(format(str("{0:#x} {0:#X}"), 42) == str("0x2a 0X2A"));
 
-        // clang-format off
-        // TODO
-        // CHECK(format("{:L}", 1234) == "1,234");  // (depending on the locale)
-        // clang-format on
+        std::locale::global(std::locale("en_US"));
+        CHECK(format("{:L}", 1234) == "1,234");
     }
     { CHECK(format(str("{}"), red) == str("red")); }
     { CHECK(format(str("{0:{1}}"), S{42}, 10) == str("xxxxxxxx42")); }
