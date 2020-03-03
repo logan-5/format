@@ -1618,8 +1618,14 @@ struct bool_spec_delegate : integral_spec_verifier<true> {
 };
 
 template <class CharT>
-struct bool_locale_writer {
+class bool_locale_writer {
+   private:
+    struct access {};
     std::basic_string<CharT> name;
+
+   public:
+    bool_locale_writer(const std::numpunct<CharT>& np, bool b, access)
+        : name{b ? np.truename() : np.falsename()} {}
 
     static std::optional<bool_locale_writer> try_create(const std::locale& loc,
                                                         bool b) {
@@ -1635,13 +1641,6 @@ struct bool_locale_writer {
         return writer(std::basic_string_view<CharT>(name), out);
     }
     std::size_t value_width() const noexcept { return name.size(); }
-
-   private:
-    struct access {};
-
-   public:
-    bool_locale_writer(const std::numpunct<CharT>& np, bool b, access)
-        : name{b ? np.truename() : np.falsename()} {}
 };
 
 template <class CharT>
@@ -1838,9 +1837,15 @@ struct integer_spec_delegate : integral_spec_verifier<> {
 };
 
 template <class CharT>
-struct integer_locale_writer {
+class integer_locale_writer {
+   private:
+    struct access {};
     CharT thousands_sep;
     std::string grouping;
+
+   public:
+    explicit integer_locale_writer(const std::numpunct<CharT>& np, access)
+        : thousands_sep{np.thousands_sep()}, grouping{np.grouping()} {}
 
     static std::optional<integer_locale_writer> try_create(
           const std::locale& loc) {
@@ -1853,58 +1858,24 @@ struct integer_locale_writer {
     }
 
     template <class GenericWriter, class Out>
-    Out write(std::string_view str, GenericWriter writer, Out out) const {
+    Out write(std::string_view s, GenericWriter writer, Out out) const {
         if (grouping.empty())
-            return writer(str, out);
+            return writer(s, out);
 
-        std::size_t first_groups_size = 0;
-        auto last_group_it = grouping.begin();
-        for (; last_group_it != std::prev(grouping.end()); ++last_group_it) {
-            const auto group_size = static_cast<std::size_t>(*last_group_it);
-            first_groups_size += group_size;
-            if (first_groups_size >= str.size()) {
-                first_groups_size -= group_size;
-                break;
-            }
-        }
-        const auto last_group_size = static_cast<std::size_t>(*last_group_it);
-        auto chars_in_last_group = str.size() - first_groups_size;
-
-        {
-            auto remainder = chars_in_last_group % last_group_size;
-            remainder = remainder ? remainder : last_group_size;
-            out = writer(str.substr(0, remainder), out);
-            str.remove_prefix(remainder);
-            chars_in_last_group -= remainder;
-        }
-
-        for (unsigned i = 0; i < chars_in_last_group; i += last_group_size) {
-            out = writer(thousands_sep, out);
-            out = writer(str.substr(0, last_group_size), out);
-            str.remove_prefix(last_group_size);
-        }
+        range<char> str = s;
+        const auto [o, last_group_it, first_groups_size] =
+              write_last_group(str, writer, out);
         if (first_groups_size == 0)
-            return out;
-        auto first_groups_it = std::prev(last_group_it);
-        while (true) {
-            out = writer(thousands_sep, out);
-            const auto size = static_cast<std::size_t>(*first_groups_it);
-            out = writer(str.substr(0, size), out);
-            if (first_groups_it == grouping.begin())
-                return out;
-            else {
-                --first_groups_it;
-                str.remove_prefix(size);
-            }
-        }
+            return o;
+        return write_first_groups(str, writer, o, std::prev(last_group_it));
     }
 
     std::size_t get_localized_size(std::string_view str) const {
         std::size_t size = str.size();
         if (grouping.empty())
             return size;
-        const auto last = grouping.end() - 1;
-        for (auto it = grouping.begin(); it != last; ++it) {
+        const auto last = std::prev(grouping.cend());
+        for (auto it = grouping.cbegin(); it != last; ++it) {
             const auto group_size = static_cast<std::size_t>(*it);
             if (group_size >= str.size())
                 return size;
@@ -1924,11 +1895,55 @@ struct integer_locale_writer {
     }
 
    private:
-    struct access {};
+    template <class GenericWriter, class Out>
+    auto write_last_group(range<char>& str,
+                          GenericWriter writer,
+                          Out out) const {
+        LRSTD_ASSERT(!str.empty());
+        std::size_t first_groups_size = 0;
+        auto last_group_it = grouping.cbegin();
+        for (; last_group_it != grouping.cend() - 1; ++last_group_it) {
+            const auto group_size = static_cast<std::size_t>(*last_group_it);
+            first_groups_size += group_size;
+            if (first_groups_size >= str.size()) {
+                first_groups_size -= group_size;
+                break;
+            }
+        }
+        const auto last_group_size = static_cast<std::size_t>(*last_group_it);
+        auto chars_in_last_group = str.size() - first_groups_size;
 
-   public:
-    explicit integer_locale_writer(const std::numpunct<CharT>& np, access)
-        : thousands_sep{np.thousands_sep()}, grouping{np.grouping()} {}
+        auto remainder = chars_in_last_group % last_group_size;
+        remainder = remainder ? remainder : last_group_size;
+        out = writer(str.substr(0, remainder).as_string_view(), out);
+        str.remove_prefix(remainder);
+        chars_in_last_group -= remainder;
+
+        for (unsigned i = 0; i < chars_in_last_group; i += last_group_size) {
+            out = writer(thousands_sep, out);
+            out = writer(str.substr(0, last_group_size).as_string_view(), out);
+            str.remove_prefix(last_group_size);
+        }
+        return std::make_tuple(out, last_group_it, first_groups_size);
+    }
+
+    template <class GenericWriter, class Out>
+    Out write_first_groups(range<char> str,
+                           GenericWriter writer,
+                           Out out,
+                           std::string::const_iterator first_groups_it) const {
+        while (true) {
+            out = writer(thousands_sep, out);
+            const auto size = static_cast<std::size_t>(*first_groups_it);
+            out = writer(str.substr(0, size).as_string_view(), out);
+            if (first_groups_it == grouping.begin())
+                return out;
+            else {
+                --first_groups_it;
+                str.remove_prefix(size);
+            }
+        }
+    }
 };
 
 template <class Int, class CharT>
