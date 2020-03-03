@@ -1856,29 +1856,46 @@ struct integer_locale_writer {
     Out write(std::string_view str, GenericWriter writer, Out out) const {
         if (grouping.empty())
             return writer(str, out);
-        auto grouping_it = std::prev(grouping.end());
-        while (true) {
-            const auto group_size = static_cast<std::size_t>(*grouping_it);
-            const auto remaining_size =
-                  std::max(group_size, str.size()) - group_size;
-            const auto remaining_groups_total =
-                  std::accumulate(grouping.begin(), grouping_it, 0ull);
-            if (remaining_groups_total > remaining_size) {
-                --grouping_it;
-                continue;
-            }
-            const auto chunk_remainder =
-                  (remaining_size - remaining_groups_total) % group_size;
-            const auto chunk_size =
-                  chunk_remainder + (chunk_remainder == 0) * group_size;
-            const auto chunk = str.substr(0, chunk_size);
 
-            out = writer(chunk, out);
-            str.remove_prefix(chunk.size());
-            if (str.empty()) {
-                return out;
+        std::size_t first_groups_size = 0;
+        auto last_group_it = grouping.begin();
+        for (; last_group_it != std::prev(grouping.end()); ++last_group_it) {
+            const auto group_size = static_cast<std::size_t>(*last_group_it);
+            first_groups_size += group_size;
+            if (first_groups_size >= str.size()) {
+                first_groups_size -= group_size;
+                break;
             }
+        }
+        const auto last_group_size = static_cast<std::size_t>(*last_group_it);
+        auto chars_in_last_group = str.size() - first_groups_size;
+
+        {
+            auto remainder = chars_in_last_group % last_group_size;
+            remainder = remainder ? remainder : last_group_size;
+            out = writer(str.substr(0, remainder), out);
+            str.remove_prefix(remainder);
+            chars_in_last_group -= remainder;
+        }
+
+        for (unsigned i = 0; i < chars_in_last_group; i += last_group_size) {
             out = writer(thousands_sep, out);
+            out = writer(str.substr(0, last_group_size), out);
+            str.remove_prefix(last_group_size);
+        }
+        if (first_groups_size == 0)
+            return out;
+        auto first_groups_it = std::prev(last_group_it);
+        while (true) {
+            out = writer(thousands_sep, out);
+            const auto size = static_cast<std::size_t>(*first_groups_it);
+            out = writer(str.substr(0, size), out);
+            if (first_groups_it == grouping.begin())
+                return out;
+            else {
+                --first_groups_it;
+                str.remove_prefix(size);
+            }
         }
     }
 
@@ -1902,7 +1919,7 @@ struct integer_locale_writer {
         for (std::size_t i = last_group_size; i < str.size();
              i += last_group_size)
             ++size;
-            
+
         return size;
     }
 

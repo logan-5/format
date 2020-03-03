@@ -258,6 +258,15 @@ TEMPLATE_TEST_CASE("int_cppreference_examples", "", char, wchar_t) {
         CHECK(format(loc, str("{:30L}"),
                      std::numeric_limits<unsigned long long>::max()) ==
               str("   18,446,744,073,709,551,61,5"));
+
+        CHECK(format(loc, str("{:L}"), 15) == str("1,5"));
+        CHECK(format(loc, str("{:^5L}"), 15) == str(" 1,5 "));
+
+        CHECK(format(loc, str("{:L}"), 615) == str("61,5"));
+        CHECK(format(loc, str("{:^5L}"), 615) == str("61,5 "));
+
+        CHECK(format(loc, str("{:L}"), 1615) == str("1,61,5"));
+        CHECK(format(loc, str("{:^8L}"), 1615) == str(" 1,61,5 "));
     }
 }
 
