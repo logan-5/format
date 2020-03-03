@@ -1597,7 +1597,7 @@ struct bool_default_engine {
         const std::string_view s = b ? "true" : "false";
         return nonoverlapping_str_writer{}(s, out);
     }
-    constexpr std::size_t value_width() const noexcept { return b ? 4 : 5; }
+    constexpr std::size_t value_width() const noexcept { return 4 + !b; }
 };
 
 struct bool_spec_delegate : integral_spec_verifier<true> {
@@ -1620,22 +1620,15 @@ struct bool_spec_delegate : integral_spec_verifier<true> {
 template <class CharT>
 class bool_locale_writer {
    private:
-    struct access {};
     std::basic_string<CharT> name;
 
-   public:
-    bool_locale_writer(const std::numpunct<CharT>& np, bool b, access)
+    bool_locale_writer(const std::numpunct<CharT>& np, bool b)
         : name{b ? np.truename() : np.falsename()} {}
 
-    static std::optional<bool_locale_writer> try_create(const std::locale& loc,
-                                                        bool b) {
-        std::optional<bool_locale_writer> ret;
-        using Facet = std::numpunct<CharT>;
-        if (std::has_facet<Facet>(loc)) {
-            ret.emplace(std::use_facet<Facet>(loc), b, access{});
-        }
-        return ret;
-    }
+   public:
+    bool_locale_writer(const std::locale& loc, bool b)
+        : bool_locale_writer{std::use_facet<std::numpunct<CharT>>(loc), b} {}
+
     template <class Writer, class Out>
     Out write(Writer writer, Out out) const {
         return writer(std::basic_string_view<CharT>(name), out);
@@ -1652,11 +1645,10 @@ struct bool_locale_engine_base : bool_default_engine {
     bool_locale_engine_base(bool b,
                             const std_format_spec_base& spec,
                             Context& context)
-        : base{b}
-        , locale_writer{spec.use_locale ? bool_locale_writer<CharT>::try_create(
-                                                context.locale(),
-                                                b)
-                                        : std::nullopt} {}
+        : base{b} {
+        if (spec.use_locale)
+            locale_writer.emplace(context.locale(), b);
+    }
 
     template <class Out>
     constexpr Out write_value(Out out) const {
@@ -1839,23 +1831,15 @@ struct integer_spec_delegate : integral_spec_verifier<> {
 template <class CharT>
 class integer_locale_writer {
    private:
-    struct access {};
     CharT thousands_sep;
     std::string grouping;
 
-   public:
-    explicit integer_locale_writer(const std::numpunct<CharT>& np, access)
+    explicit integer_locale_writer(const std::numpunct<CharT>& np)
         : thousands_sep{np.thousands_sep()}, grouping{np.grouping()} {}
 
-    static std::optional<integer_locale_writer> try_create(
-          const std::locale& loc) {
-        std::optional<integer_locale_writer> ret;
-        using Facet = std::numpunct<CharT>;
-        if (std::has_facet<Facet>(loc)) {
-            ret.emplace(std::use_facet<Facet>(loc), access{});
-        }
-        return ret;
-    }
+   public:
+    explicit integer_locale_writer(const std::locale& loc)
+        : integer_locale_writer{std::use_facet<std::numpunct<CharT>>(loc)} {}
 
     template <class GenericWriter, class Out>
     Out write(std::string_view s, GenericWriter writer, Out out) const {
@@ -1956,11 +1940,10 @@ struct integer_locale_engine_base : integer_spec_engine_base<Int> {
     integer_locale_engine_base(Int i,
                                const std_format_spec_base& spec,
                                Context& context)
-        : base{i, spec}
-        , locale_writer{spec.use_locale
-                              ? integer_locale_writer<CharT>::try_create(
-                                      context.locale())
-                              : std::nullopt} {}
+        : base{i, spec} {
+        if (spec.use_locale)
+            locale_writer.emplace(context.locale());
+    }
 
     std::size_t value_width() const noexcept {
         return locale_writer
