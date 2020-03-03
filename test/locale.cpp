@@ -1,6 +1,7 @@
 #include "format.hpp"
 
 #include "converter.hpp"
+#include "locales.hpp"
 #include "user_defined.hpp"
 
 #include <catch.hpp>
@@ -227,6 +228,54 @@ TEMPLATE_TEST_CASE("locale_formatted_size", "", char, wchar_t) {
     }
 }
 
+TEMPLATE_TEST_CASE("int_locale",
+                   "",
+                   (std::tuple<char, en_US_locale>),
+                   (std::tuple<wchar_t, en_US_locale>),
+                   (std::tuple<char, en_US_funky_locale>),
+                   (std::tuple<wchar_t, en_US_funky_locale>)) {
+    using lrstd::format;
+    using charT = std::tuple_element_t<0, TestType>;
+    str_fn<charT> str;
+
+    using loc_getter = std::tuple_element_t<1, TestType>;
+    std::locale loc = loc_getter{}();
+
+    CHECK(format(loc, str("{:L}"), 1234) == str("1,234"));
+    CHECK(format(loc, str("{}"), 1234) == str("1234"));
+    CHECK(format(loc, str("{:}"), 1234) == str("1234"));
+    CHECK(format(loc, str("{:d}"), 1234) == str("1234"));
+
+    CHECK(format(loc, str("{:L}"), -1234) == str("-1,234"));
+    CHECK(format(loc, str("{}"), -1234) == str("-1234"));
+    CHECK(format(loc, str("{:}"), -1234) == str("-1234"));
+    CHECK(format(loc, str("{:d}"), -1234) == str("-1234"));
+
+    CHECK(format(loc, str("{:<L}"), -1234) == str("-1,234"));
+    CHECK(format(loc, str("{:>L}"), -1234) == str("-1,234"));
+    CHECK(format(loc, str("{:^L}"), -1234) == str("-1,234"));
+    CHECK(format(loc, str("{:0L}"), -1234) == str("-1,234"));
+
+    CHECK(format(loc, str("{:<8L}"), -1234) == str("-1,234  "));
+    CHECK(format(loc, str("{:>8L}"), -1234) == str("  -1,234"));
+    CHECK(format(loc, str("{:^8L}"), -1234) == str(" -1,234 "));
+    CHECK(format(loc, str("{:08L}"), -1234) == str("-001,234"));
+
+    CHECK(format(loc, str("{:<+8L}"), 1234) == str("+1,234  "));
+    CHECK(format(loc, str("{:>+8L}"), 1234) == str("  +1,234"));
+    CHECK(format(loc, str("{:^+8L}"), 1234) == str(" +1,234 "));
+    CHECK(format(loc, str("{:+08L}"), 1234) == str("+001,234"));
+
+    CHECK(format(loc, str("{:< 8L}"), 1234) == str(" 1,234  "));
+    CHECK(format(loc, str("{:> 8L}"), 1234) == str("   1,234"));
+    CHECK(format(loc, str("{:^ 8L}"), 1234) == str("  1,234 "));
+    CHECK(format(loc, str("{: 08L}"), 1234) == str(" 001,234"));
+
+    CHECK(format(loc, str("{:Lx}"), 10000) == str("2,710"));
+    CHECK(format(loc, str("{:Lx}"), 10000) == str("2,710"));
+    CHECK(format(loc, str("{:Lb}"), 10000) == str("10,011,100,010,000"));
+}
+
 TEMPLATE_TEST_CASE("int_cppreference_examples", "", char, wchar_t) {
     using lrstd::format;
     using charT = TestType;
@@ -267,6 +316,21 @@ TEMPLATE_TEST_CASE("int_cppreference_examples", "", char, wchar_t) {
 
         CHECK(format(loc, str("{:L}"), 1615) == str("1,61,5"));
         CHECK(format(loc, str("{:^8L}"), 1615) == str(" 1,61,5 "));
+    }
+}
+
+TEMPLATE_TEST_CASE("bool_locale", "", char, wchar_t) {
+    using lrstd::format;
+    using charT = TestType;
+    str_fn<charT> str;
+    {
+        std::locale::global(std::locale("en_US"));
+        CHECK(format(str("{:L}"), true) == str("true"));
+        CHECK(format(str("{:L}"), true) == str("true"));
+    }
+    {
+        CHECK(format(std::locale("en_US"), str("{:L}"), true) == str("true"));
+        CHECK(format(std::locale("en_US"), str("{:L}"), true) == str("true"));
     }
 }
 
