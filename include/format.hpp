@@ -828,6 +828,8 @@ struct range {
     }
 #else
     iterator find(CharT c) const noexcept {
+        if (size() < 64)
+            return std::find(begin(), end(), c);
         auto result = traits_type::find(begin(), size(), c);
         return result ? result : end();
     }
