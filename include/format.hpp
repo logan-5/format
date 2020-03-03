@@ -1886,19 +1886,24 @@ struct integer_locale_writer {
         std::size_t size = str.size();
         if (grouping.empty())
             return size;
-        auto grouping_it = grouping.begin();
-        while (true) {
-            const auto group_count = static_cast<std::size_t>(*grouping_it);
-            const auto chunk = str.substr(0, group_count);
-            str.remove_prefix(chunk.size());
-            if (str.empty()) {
+        const auto last = grouping.end() - 1;
+        for (auto it = grouping.begin(); it != last; ++it) {
+            const auto group_size = static_cast<std::size_t>(*it);
+            if (group_size >= str.size())
                 return size;
-            }
+            str.remove_prefix(group_size);
             ++size;
-            if (auto next_grouping = std::next(grouping_it);
-                next_grouping != grouping.end())
-                grouping_it = next_grouping;
         }
+
+        // this 'linear divide' was measured to be significantly faster than an
+        // actual integer division, especially since these strings will always
+        // be relatively short
+        const auto last_group_size = static_cast<std::size_t>(grouping.back());
+        for (std::size_t i = last_group_size; i < str.size();
+             i += last_group_size)
+            ++size;
+            
+        return size;
     }
 
    private:
