@@ -807,7 +807,8 @@ struct range {
     }
 
     constexpr void remove_prefix(size_type n) noexcept { _begin += n; }
-    constexpr CharT operator[](size_type n) const noexcept { return _begin[n]; }
+
+    constexpr CharT front() const noexcept { return *_begin; }
 
     constexpr range substr(size_type start) const noexcept {
         return range{_begin + start, _end};
@@ -839,23 +840,12 @@ struct range {
         return basic_string_view<CharT>(
               _begin, static_cast<std::size_t>(_end - _begin));
     }
-    explicit operator basic_string_view<CharT>() const noexcept {
-        return as_string_view();
-    }
 
     constexpr bool match_nonempty(CharT c) const noexcept {
         return *begin() == c;
     }
     constexpr bool match(CharT c) const noexcept {
         return !empty() && match_nonempty(c);
-    }
-    constexpr bool consume(range<CharT> prefix) {
-        if (size() >= prefix.size() &&
-            traits_type::compare(begin(), prefix.begin(), prefix.size()) == 0) {
-            remove_prefix(prefix.size());
-            return true;
-        }
-        return false;
     }
     constexpr bool consume(CharT c) {
         if (match(c)) {
@@ -1149,7 +1139,7 @@ struct std_spec_parser {
         if (fmt.size() >= 2) {
             auto next = fmt.substr(1);
             if (parse_align(next)) {
-                spec.fill = fmt[0];
+                spec.fill = fmt.front();
                 fmt = next;
                 return;
             }
@@ -1216,7 +1206,7 @@ struct std_spec_parser {
             return '\0';
         constexpr const char* type_chars = "aAbBcdeEfFgGnopsxX";
         const char* end = type_chars + std::strlen(type_chars);
-        const auto t = std::find(type_chars, end, fmt[0]);
+        const auto t = std::find(type_chars, end, fmt.front());
         if (t != end) {
             fmt.remove_prefix(1);
         }
@@ -2425,7 +2415,7 @@ struct fmt_str_parser {
 
     template <class Callbacks>
     constexpr bool parse(Callbacks cb) {
-        auto write_text = [&](range<CharT> text) {
+        auto write_text = [cb](range<CharT> text) {
             while (!text.empty()) {
                 auto rbrace_it = text.find('}');
                 if (rbrace_it == text.end()) {
