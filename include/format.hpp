@@ -1259,11 +1259,8 @@ struct single_char_writer {
 };
 struct repeated_char_writer {
     template <class CharT, class Out>
-    constexpr Out operator()(CharT c, std::size_t count, Out out) const
-          noexcept(noexcept(*out++ = c)) {
-        while (count--)
-            *out++ = c;
-        return out;
+    constexpr Out operator()(CharT c, std::size_t count, Out out) const {
+        return std::fill_n(out, count, c);
     }
 #if !LRSTD_USE_EXTRA_CONSTEXPR
     template <class CharT, class Traits = std::char_traits<CharT>>
@@ -1298,11 +1295,8 @@ struct repeated_char_writer {
 struct str_writer_common {
     template <class CharT, class Traits, class Out>
     constexpr Out operator()(std::basic_string_view<CharT, Traits> str,
-                             Out out) const
-          noexcept(noexcept(*out++ = std::declval<CharT&>())) {
-        for (CharT c : str)
-            *out++ = c;
-        return out;
+                             Out out) const {
+        return std::copy(str.begin(), str.end(), out);
     }
     template <class CharT, class Traits>
     constexpr char_counter operator()(std::basic_string_view<CharT, Traits> str,
