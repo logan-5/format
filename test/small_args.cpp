@@ -16,6 +16,12 @@
         CHECK(std::apply(                                                      \
                     [&](const auto&... args) { return format(fmt, args...); }, \
                     array) == std::basic_string<TestType>((ARITY), str('0'))); \
+        CHECK(std::apply(                                                      \
+                    [&](const auto&... args) {                                 \
+                        return format_args(make_format_args(args...));         \
+                    },                                                         \
+                    array)                                                     \
+                    ._get_size() == ARITY);                                    \
     } while (false)
 
 TEMPLATE_TEST_CASE("small_args", "", char, wchar_t) {

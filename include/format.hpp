@@ -613,11 +613,16 @@ LRSTD_EXTRA_CONSTEXPR auto visit_format_arg(Visitor&& visitor,
 namespace detail {
 inline constexpr std::size_t size_bit_count = sizeof(std::size_t) * CHAR_BIT;
 inline constexpr std::size_t small_bit = 1ull << (size_bit_count - 1ull);
+inline constexpr std::size_t small_size_bit_offset = size_bit_count - 5ull;
+inline constexpr std::size_t small_size_bit_mask = 0b1111ull;
+
 inline constexpr std::size_t tag_bit_count = 4ull;
 inline constexpr std::size_t small_arg_count =
-      (sizeof(std::size_t) * CHAR_BIT - 1) / tag_bit_count;
+      (sizeof(std::size_t) * CHAR_BIT - 1) / tag_bit_count - 1;
 inline constexpr std::size_t tag_bit_mask = std::size_t(-1) >>
                                             (size_bit_count - tag_bit_count);
+
+static_assert(small_arg_count <= small_size_bit_mask);
 
 template <class Context, class T>
 constexpr std::size_t get_tag_bits() noexcept {
@@ -628,7 +633,7 @@ constexpr std::size_t get_tag_bits() noexcept {
 template <class Context, class... Args>
 constexpr std::size_t get_small_args_tags() {
     static_assert(sizeof...(Args) <= small_arg_count);
-    std::size_t tags = small_bit;
+    std::size_t tags = small_bit | (sizeof...(Args) << small_size_bit_offset);
     std::size_t shift = 0;
     ((tags |= (get_tag_bits<Context, Args>() << (shift++ * tag_bit_count))),
      ...);
@@ -690,6 +695,10 @@ class basic_format_args {
                                  _data)[i]
                          : basic_format_arg<Context>();
     }
+	
+	constexpr std::size_t get_small_size() const noexcept {
+		return _size >> detail::small_size_bit_offset & detail::small_size_bit_mask;
+	}
 
    public:
     LRSTD_EXTRA_CONSTEXPR basic_format_args() noexcept
@@ -704,6 +713,10 @@ class basic_format_args {
           noexcept {
         return is_small() ? get_small(i) : get_large(i);
     }
+	
+	constexpr std::size_t _get_size() const noexcept {
+		return is_small() ? get_small_size() : _size;
+	}
 };
 
 template <class Out, class CharT>
@@ -739,7 +752,7 @@ class basic_format_context {
     detail::vformat_to_core(basic_format_context<O, C>& context,
                             basic_string_view<C> fmt_sv);
 
-    constexpr std::size_t args_size() const { return _args._size; }
+    constexpr std::size_t args_size() const { return _args._get_size(); }
 
    public:
     using iterator = Out;
