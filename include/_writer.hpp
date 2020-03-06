@@ -47,15 +47,8 @@ struct repeated_char_writer {
     template <class CharT, class It>
     constexpr write_n_iter<It> operator()(CharT c,
                                           std::size_t count,
-                                          write_n_iter<It> w) const
-          noexcept(noexcept((*this)(c, count, w.it))) {
-        const auto to_write = std::min(count, w.remaining());
-        w.it = (*this)(c, to_write, w.it);
-        w.current += to_write;
-        if (count > to_write) {
-            w.overflow += count - to_write;
-        }
-        return w;
+                                          write_n_iter<It> w) const {
+        return w.write(c, count, *this);
     }
 };
 
@@ -79,13 +72,8 @@ struct str_write_n_optimization {
     template <class CharT, class Traits, class It>
     constexpr write_n_iter<It> operator()(
           std::basic_string_view<CharT, Traits> str,
-          write_n_iter<It> w) const
-          noexcept(noexcept(static_cast<const Derived&> (*this)(str, w.it))) {
-        auto truncated_str = str.substr(0, w.remaining());
-        w.it = static_cast<const Derived&>(*this)(truncated_str, w.it);
-        w.current += truncated_str.size();
-        w.overflow += str.size() - truncated_str.size();
-        return w;
+          write_n_iter<It> w) const {
+        return w.write(str, static_cast<const Derived&>(*this));
     }
 };
 struct overlapping_str_writer

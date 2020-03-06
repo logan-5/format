@@ -72,10 +72,6 @@ class write_n_iter {
         return static_cast<std::size_t>(n - current);
     }
 
-    template <class>
-    friend struct str_write_n_optimization;
-    friend struct repeated_char_writer;
-
    public:
     constexpr write_n_iter(iter_difference_t<It> n, It it)
         : n{n}, it{it}, current{0}, overflow{0} {}
@@ -98,6 +94,29 @@ class write_n_iter {
             ++current;
         } else
             ++overflow;
+        return *this;
+    }
+
+    template <class C, class UnderlyingWriter>
+    constexpr write_n_iter& write(C c,
+                                  std::size_t count,
+                                  UnderlyingWriter writer) {
+        const auto to_write = std::min(count, remaining());
+        it = writer(c, to_write, it);
+        current += to_write;
+        if (count > to_write) {
+            overflow += count - to_write;
+        }
+        return *this;
+    }
+
+    template <class C, class T, class UnderlyingWriter>
+    constexpr write_n_iter& write(std::basic_string_view<C, T> str,
+                                  UnderlyingWriter writer) {
+        auto truncated_str = str.substr(0, remaining());
+        it = writer(truncated_str, it);
+        current += truncated_str.size();
+        overflow += str.size() - truncated_str.size();
         return *this;
     }
 
