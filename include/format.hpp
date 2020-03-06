@@ -1,6 +1,10 @@
 #ifndef LRSTD_FORMAT_HPP
 #define LRSTD_FORMAT_HPP
 
+#include "_common.hpp"
+#include "_iter.hpp"
+#include "_writer.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -19,18 +23,6 @@
 #include <vector>
 
 namespace lrstd {
-
-#define LRSTD_UNREACHABLE() __builtin_unreachable()
-#define LRSTD_ASSERT(...) assert(__VA_ARGS__)
-#define LRSTD_ALWAYS_INLINE __attribute__((always_inline))
-
-// #define LRSTD_USE_EXTRA_CONSTEXPR false
-
-#if LRSTD_USE_EXTRA_CONSTEXPR
-#define LRSTD_EXTRA_CONSTEXPR constexpr
-#else
-#define LRSTD_EXTRA_CONSTEXPR
-#endif
 
 // clang-format off
 /*
@@ -307,22 +299,6 @@ template <class It, class = std::enable_if_t<!std::is_pointer_v<It>>>
 constexpr It to_iter(It ptr, It) noexcept {
     return ptr;
 }
-
-struct char_counter {
-    std::size_t count = 0;
-};
-template <class It>
-struct write_n_wrapper {
-    iter_difference_t<It> n;
-    It it;
-    iter_difference_t<It> current = 0;
-    iter_difference_t<It> overflow = 0;
-
-    std::size_t remaining() const noexcept {
-        LRSTD_ASSERT(n >= current);
-        return static_cast<std::size_t>(n - current);
-    }
-};
 
 }  // namespace detail
 
@@ -695,10 +671,11 @@ class basic_format_args {
                                  _data)[i]
                          : basic_format_arg<Context>();
     }
-	
-	constexpr std::size_t get_small_size() const noexcept {
-		return _size >> detail::small_size_bit_offset & detail::small_size_bit_mask;
-	}
+
+    constexpr std::size_t get_small_size() const noexcept {
+        return _size >> detail::small_size_bit_offset &
+               detail::small_size_bit_mask;
+    }
 
    public:
     LRSTD_EXTRA_CONSTEXPR basic_format_args() noexcept
@@ -713,10 +690,10 @@ class basic_format_args {
           noexcept {
         return is_small() ? get_small(i) : get_large(i);
     }
-	
-	constexpr std::size_t _get_size() const noexcept {
-		return is_small() ? get_small_size() : _size;
-	}
+
+    constexpr std::size_t _get_size() const noexcept {
+        return is_small() ? get_small_size() : _size;
+    }
 };
 
 template <class Out, class CharT>
@@ -784,13 +761,6 @@ make_wformat_args(const Args&... args) {
 }
 
 namespace detail {
-
-template <typename... F>
-struct overloaded : public F... {
-    using F::operator()...;
-};
-template <typename... F>
-overloaded(F...)->overloaded<F...>;
 
 template <class CharT>
 struct range {
@@ -1237,138 +1207,6 @@ struct std_spec_parser {
         return fmt;
     }
 };
-
-struct single_char_writer {
-    template <class CharT, class Out>
-    constexpr Out operator()(CharT c, Out out) const
-          noexcept(noexcept(*out++ = c)) {
-        *out++ = c;
-        return out;
-    }
-    template <class CharT, class Traits = std::char_traits<CharT>>
-    constexpr CharT* operator()(CharT c, CharT* out) const
-          noexcept(noexcept(Traits::assign(*out++, c))) {
-        Traits::assign(*out++, c);
-        return out;
-    }
-    template <class CharT>
-    constexpr char_counter operator()(CharT, char_counter counter) const
-          noexcept {
-        ++counter.count;
-        return counter;
-    }
-    template <class CharT, class It>
-    constexpr write_n_wrapper<It> operator()(CharT c,
-                                             write_n_wrapper<It> w) const
-          noexcept(noexcept((*this)(c, w.it))) {
-        if (w.current < w.n) {
-            w.it = (*this)(c, w.it);
-            ++w.current;
-            return w;
-        }
-        ++w.overflow;
-        return w;
-    }
-};
-struct repeated_char_writer {
-    template <class CharT, class Out>
-    constexpr Out operator()(CharT c, std::size_t count, Out out) const {
-        return std::fill_n(out, count, c);
-    }
-#if !LRSTD_USE_EXTRA_CONSTEXPR
-    template <class CharT, class Traits = std::char_traits<CharT>>
-    constexpr CharT* operator()(CharT c, std::size_t count, CharT* out) const
-          noexcept(noexcept(Traits::assign(out, count, c))) {
-        Traits::assign(out, count, c);
-        return out + count;
-    }
-#endif
-    template <class CharT>
-    constexpr char_counter operator()(CharT,
-                                      std::size_t count,
-                                      char_counter counter) const noexcept {
-        counter.count += count;
-        return counter;
-    }
-    template <class CharT, class It>
-    constexpr write_n_wrapper<It> operator()(CharT c,
-                                             std::size_t count,
-                                             write_n_wrapper<It> w) const
-          noexcept(noexcept((*this)(c, count, w.it))) {
-        const auto to_write = std::min(count, w.remaining());
-        w.it = (*this)(c, to_write, w.it);
-        w.current += to_write;
-        if (count > to_write) {
-            w.overflow += count - to_write;
-        }
-        return w;
-    }
-};
-
-struct str_writer_common {
-    template <class CharT, class Traits, class Out>
-    constexpr Out operator()(std::basic_string_view<CharT, Traits> str,
-                             Out out) const {
-        return std::copy(str.begin(), str.end(), out);
-    }
-    template <class CharT, class Traits>
-    constexpr char_counter operator()(std::basic_string_view<CharT, Traits> str,
-                                      char_counter counter) const noexcept {
-        counter.count += str.size();
-        return counter;
-    }
-};
-struct overlapping_str_writer : str_writer_common {
-    using str_writer_common::operator();
-#if !LRSTD_USE_EXTRA_CONSTEXPR
-    template <class CharT, class Traits>
-    constexpr CharT* operator()(std::basic_string_view<CharT, Traits> str,
-                                CharT* out) const noexcept(false) {
-        std::char_traits<CharT>::move(out, str.data(), str.size());
-        return out + str.size();
-    }
-#endif
-    template <class CharT, class Traits, class It>
-    constexpr write_n_wrapper<It> operator()(
-          std::basic_string_view<CharT, Traits> str,
-          write_n_wrapper<It> w) const noexcept(noexcept((*this)(str, w.it))) {
-        auto truncated_str = str.substr(0, w.remaining());
-        w.it = (*this)(truncated_str, w.it);
-        w.current += truncated_str.size();
-        w.overflow += str.size() - truncated_str.size();
-        return w;
-    }
-};
-struct overlapping_generic_writer
-    : overloaded<overlapping_str_writer,
-                 single_char_writer,
-                 repeated_char_writer> {};
-
-struct nonoverlapping_str_writer : str_writer_common {
-    using str_writer_common::operator();
-#if !LRSTD_USE_EXTRA_CONSTEXPR
-    template <class CharT, class Traits>
-    constexpr CharT* operator()(std::basic_string_view<CharT, Traits> str,
-                                CharT* out) const noexcept(false) {
-        std::char_traits<CharT>::copy(out, str.data(), str.size());
-        return out + str.size();
-    }
-#endif
-    template <class CharT, class Traits, class It>
-    constexpr write_n_wrapper<It> operator()(
-          std::basic_string_view<CharT, Traits> str,
-          write_n_wrapper<It> w) const noexcept(noexcept((*this)(str, w.it))) {
-        auto truncated_str = str.substr(0, w.remaining());
-        w.it = (*this)(truncated_str, w.it);
-        w.current += truncated_str.size();
-        w.overflow += str.size() - truncated_str.size();
-        return w;
-    }
-};
-struct nonoverlapping_generic_writer
-    : overloaded<nonoverlapping_str_writer,
-                 single_char_writer,
-                 repeated_char_writer> {};
 
 template <class CharT>
 struct std_formatter_driver {
@@ -2720,42 +2558,42 @@ template <class... Args>
 LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(const std::locale& loc,
                                                  std::string_view fmt,
                                                  const Args&... args) {
-    using Context = basic_format_context<detail::char_counter,
+    using Context = basic_format_context<detail::count_iter,
                                          std::string_view::value_type>;
-    return lrstd::vformat_to(detail::char_counter{}, loc, fmt,
+    return lrstd::vformat_to(detail::count_iter{}, loc, fmt,
                              {make_format_args<Context>(args...)})
-          .count;
+          .count();
 }
 
 template <class... Args>
 LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(const std::locale& loc,
                                                  std::wstring_view fmt,
                                                  const Args&... args) {
-    using Context = basic_format_context<detail::char_counter,
+    using Context = basic_format_context<detail::count_iter,
                                          std::wstring_view::value_type>;
-    return lrstd::vformat_to(detail::char_counter{}, loc, fmt,
+    return lrstd::vformat_to(detail::count_iter{}, loc, fmt,
                              {make_format_args<Context>(args...)})
-          .count;
+          .count();
 }
 
 template <class... Args>
 LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(std::string_view fmt,
                                                  const Args&... args) {
-    using Context = basic_format_context<detail::char_counter,
+    using Context = basic_format_context<detail::count_iter,
                                          std::string_view::value_type>;
-    return lrstd::vformat_to(detail::char_counter{}, fmt,
+    return lrstd::vformat_to(detail::count_iter{}, fmt,
                              {make_format_args<Context>(args...)})
-          .count;
+          .count();
 }
 
 template <class... Args>
 LRSTD_EXTRA_CONSTEXPR std::size_t formatted_size(std::wstring_view fmt,
                                                  const Args&... args) {
-    using Context = basic_format_context<detail::char_counter,
+    using Context = basic_format_context<detail::count_iter,
                                          std::wstring_view::value_type>;
-    return lrstd::vformat_to(detail::char_counter{}, fmt,
+    return lrstd::vformat_to(detail::count_iter{}, fmt,
                              {make_format_args<Context>(args...)})
-          .count;
+          .count();
 }
 
 template <class Out>
@@ -2771,9 +2609,9 @@ LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
       const std::locale& loc,
       std::string_view fmt,
       const Args&... args) {
-    auto result = lrstd::format_to(detail::write_n_wrapper<Out>{n, out}, loc,
-                                   fmt, args...);
-    return format_to_n_result<Out>{result.it, result.current + result.overflow};
+    auto result = lrstd::format_to(detail::write_n_iter<Out>{n, out}, loc, fmt,
+                                   args...);
+    return format_to_n_result<Out>{result.iter(), result.count()};
 }
 
 template <class Out, class... Args>
@@ -2783,9 +2621,9 @@ LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
       const std::locale& loc,
       std::wstring_view fmt,
       const Args&... args) {
-    auto result = lrstd::format_to(detail::write_n_wrapper<Out>{n, out}, loc,
-                                   fmt, args...);
-    return format_to_n_result<Out>{result.it, result.current + result.overflow};
+    auto result = lrstd::format_to(detail::write_n_iter<Out>{n, out}, loc, fmt,
+                                   args...);
+    return format_to_n_result<Out>{result.iter(), result.count()};
 }
 
 template <class Out, class... Args>
@@ -2795,8 +2633,8 @@ LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
       std::string_view fmt,
       const Args&... args) {
     auto result =
-          lrstd::format_to(detail::write_n_wrapper<Out>{n, out}, fmt, args...);
-    return format_to_n_result<Out>{result.it, result.current + result.overflow};
+          lrstd::format_to(detail::write_n_iter<Out>{n, out}, fmt, args...);
+    return format_to_n_result<Out>{result.iter(), result.count()};
 }
 
 template <class Out, class... Args>
@@ -2806,8 +2644,8 @@ LRSTD_EXTRA_CONSTEXPR format_to_n_result<Out> format_to_n(
       std::wstring_view fmt,
       const Args&... args) {
     auto result =
-          lrstd::format_to(detail::write_n_wrapper<Out>{n, out}, fmt, args...);
-    return format_to_n_result<Out>{result.it, result.current + result.overflow};
+          lrstd::format_to(detail::write_n_iter<Out>{n, out}, fmt, args...);
+    return format_to_n_result<Out>{result.iter(), result.count()};
 }
 
 }  // namespace lrstd
