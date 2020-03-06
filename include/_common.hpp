@@ -20,7 +20,12 @@
 #define LRSTD_EXTRA_CONSTEXPR
 #endif
 
-namespace lrstd::detail {
+namespace lrstd {
+
+template <class It>
+using iter_difference_t = std::ptrdiff_t;
+
+namespace detail {
 
 template <class... F>
 struct overloaded : F... {
@@ -102,5 +107,6 @@ constexpr It to_iter(It ptr, It) noexcept {
 }
 
 }  // namespace detail
+}  // namespace lrstd
 
 #endif

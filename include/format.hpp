@@ -116,27 +116,15 @@ namespace detail {
 }
 }  // namespace detail
 
-template <class It>
-struct iter_difference {
-    using type = typename std::iterator_traits<
-          std::remove_reference_t<std::remove_cv_t<It>>>::difference_type;
-};
-template <class T>
-struct iter_difference<std::back_insert_iterator<T>> {
-    using type = std::ptrdiff_t;
-};
-template <class It>
-using iter_difference_t = typename iter_difference<It>::type;
-
 template <typename CharT>
 using basic_string_view = std::basic_string_view<CharT>;
 
 template <class Out, class CharT>
 class basic_format_context;
 using format_context =
-      basic_format_context<std::back_insert_iterator<std::string>, char>;
+      basic_format_context<detail::build_buf_iter<char>, char>;
 using wformat_context =
-      basic_format_context<std::back_insert_iterator<std::wstring>, wchar_t>;
+      basic_format_context<detail::build_buf_iter<wchar_t>, wchar_t>;
 
 template <class CharT>
 class basic_format_parse_context;
@@ -2354,19 +2342,17 @@ template <class CharT>
 LRSTD_EXTRA_CONSTEXPR std::basic_string<CharT> vformat_impl(
       const std::locale& loc,
       basic_string_view<CharT> fmt,
-      format_args_t<std::back_insert_iterator<std::basic_string<CharT>>, CharT>
-            args) {
+      format_args_t<build_buf_iter<CharT>, CharT> args) {
     std::basic_string<CharT> ret;
-    lrstd::detail::vformat_to_impl(std::back_inserter(ret), loc, fmt, args);
+    lrstd::detail::vformat_to_impl(build_buf_iter(ret), loc, fmt, args);
     return ret;
 }
 template <class CharT>
 LRSTD_EXTRA_CONSTEXPR std::basic_string<CharT> vformat_impl(
       basic_string_view<CharT> fmt,
-      format_args_t<std::back_insert_iterator<std::basic_string<CharT>>, CharT>
-            args) {
+      format_args_t<build_buf_iter<CharT>, CharT> args) {
     std::basic_string<CharT> ret;
-    lrstd::detail::vformat_to_impl(std::back_inserter(ret), fmt, args);
+    lrstd::detail::vformat_to_impl(build_buf_iter(ret), fmt, args);
     return ret;
 }
 

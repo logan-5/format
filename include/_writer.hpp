@@ -36,6 +36,13 @@ struct repeated_char_writer {
     }
 #endif
 
+    // build_buf_iter optimization
+    template <class CharT, class OutCharT>
+    constexpr build_buf_iter<OutCharT>
+    operator()(CharT c, std::size_t count, build_buf_iter<OutCharT> out) const {
+        return out.write(c, count);
+    }
+
     // write_n optimization
     template <class CharT, class It>
     constexpr write_n_iter<It> operator()(CharT c,
@@ -57,6 +64,14 @@ struct str_writer_common {
     constexpr Out operator()(std::basic_string_view<CharT, Traits> str,
                              Out out) const {
         return std::copy(str.begin(), str.end(), out);
+    }
+
+    // build_buf_iter optimization
+    template <class CharT, class Traits, class OutCharT>
+    constexpr build_buf_iter<OutCharT> operator()(
+          std::basic_string_view<CharT, Traits> str,
+          build_buf_iter<OutCharT> out) const {
+        return out.write(str);
     }
 };
 template <class Derived>

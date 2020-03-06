@@ -13,6 +13,29 @@ template <class CharT>
 inline constexpr bool is_char_or_wchar_t_v =
       std::is_same_v<char, CharT> || std::is_same_v<wchar_t, CharT>;
 
+template <class CharT>
+class build_buf_iter
+    : public std::back_insert_iterator<std::basic_string<CharT>> {
+   private:
+    using base = std::back_insert_iterator<std::basic_string<CharT>>;
+    using base::container;
+
+   public:
+    explicit build_buf_iter(std::basic_string<CharT>& s) : base(s) {}
+
+    template <class C, class T>
+    build_buf_iter& write(std::basic_string_view<C, T> sv) {
+        container->append(sv.begin(), sv.end());
+        return *this;
+    }
+
+    template <class C>
+    build_buf_iter& write(C c, std::size_t count) {
+        container->append(count, c);
+        return *this;
+    }
+};
+
 class count_iter {
     std::size_t _count = 0;
 
@@ -36,9 +59,6 @@ class count_iter {
 
     constexpr std::size_t count() const noexcept { return _count; }
 };
-
-template <class It>
-using iter_difference_t = std::ptrdiff_t;
 
 template <class It>
 class write_n_iter {
