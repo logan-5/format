@@ -21,12 +21,6 @@ struct single_char_writer {
         Traits::assign(*out++, c);
         return out;
     }
-    // template <class CharT>
-    // constexpr char_counter operator()(CharT, char_counter counter) const
-    //       noexcept {
-    //     ++counter.count;
-    //     return counter;
-    // }
 };
 struct repeated_char_writer {
     template <class CharT, class Out>
