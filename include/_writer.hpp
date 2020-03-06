@@ -2,6 +2,7 @@
 #define LRSTD_FORMAT_WRITER_HPP
 
 #include "_common.hpp"
+#include "_iter.hpp"
 
 #include <algorithm>
 #include <string_view>
