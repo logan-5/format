@@ -42,7 +42,6 @@ using iter_difference_t = std::ptrdiff_t;
 
 template <class It>
 class write_n_iter {
-   public:
     iter_difference_t<It> n;
     It it;
     iter_difference_t<It> current;
@@ -52,6 +51,10 @@ class write_n_iter {
         LRSTD_ASSERT(n >= current);
         return static_cast<std::size_t>(n - current);
     }
+
+    template <class>
+    friend struct str_write_n_optimization;
+    friend struct repeated_char_writer;
 
    public:
     constexpr write_n_iter(iter_difference_t<It> n, It it)
