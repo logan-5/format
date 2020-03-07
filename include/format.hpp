@@ -2214,6 +2214,9 @@ namespace detail {
 
 template <class CharT>
 struct replacement_field {
+    explicit replacement_field(std::size_t arg_id,
+                               range<CharT> format_spec = {})
+        : format_spec{format_spec}, arg_id{arg_id} {}
     range<CharT> format_spec;
     std::size_t arg_id;
 };
@@ -2223,44 +2226,38 @@ struct fmt_str_parser {
     range<CharT> fmt;
 
     template <class Callbacks>
-    constexpr bool parse(Callbacks cb) {
+    constexpr void parse(Callbacks cb) {
         while (!fmt.empty()) {
             const auto lbrace_it = fmt.find('{');
-            if (lbrace_it == fmt.end()) {
+            if (lbrace_it == fmt.end())
                 return write_text(cb, fmt);
-            }
             auto next = lbrace_it + 1;
             if (next == fmt.end())
-                return false;
+                return cb.error();
             if (*next != '{') {
                 write_text(cb, range<CharT>{fmt.begin(), lbrace_it});
                 fmt.advance_to(next);
-                if (!parse_replacement_field(cb))
-                    return false;
+                parse_replacement_field(cb);
             } else {
                 write_text(cb, range<CharT>{fmt.begin(), next});
                 fmt.advance_to(next + 1);
             }
         }
-        return true;
     }
 
    private:
     template <class Callbacks>
-    static constexpr bool write_text(Callbacks cb, range<CharT> text) {
+    static constexpr void write_text(Callbacks cb, range<CharT> text) {
         while (!text.empty()) {
             auto rbrace_it = text.find('}');
-            if (rbrace_it == text.end()) {
-                cb.text(text);
-                break;
-            }
+            if (rbrace_it == text.end())
+                return cb.text(text);
             ++rbrace_it;
             if (rbrace_it == text.end() || *rbrace_it != '}')
-                return false;
+                return cb.error();
             cb.text(range<CharT>{text.begin(), rbrace_it});
-            text.advance_to(rbrace_it + 1);
+            text.advance_to(++rbrace_it);
         }
-        return true;
     }
 
     constexpr parse_integer_result parse_arg_id() {
@@ -2271,16 +2268,14 @@ struct fmt_str_parser {
     }
 
     template <class Callbacks>
-    constexpr bool parse_replacement_field(Callbacks cb) {
+    constexpr void parse_replacement_field(Callbacks cb) {
         LRSTD_ASSERT(!fmt.empty());
-        if (fmt.consume_nonempty('}')) {
-            cb.replacement_field(
-                  replacement_field<CharT>{{}, cb.next_arg_id()});
-            return true;
-        }
+        if (fmt.consume_nonempty('}'))
+            return cb.replacement_field(
+                  replacement_field<CharT>{cb.next_arg_id()});
         const parse_integer_result arg_value = parse_arg_id();
         if (arg_value.tag == parse_integer_result::type::error)
-            return false;
+            return cb.error();
         const std::size_t arg_id =
               arg_value.tag == parse_integer_result::type::none
                     ? cb.next_arg_id()
@@ -2288,11 +2283,12 @@ struct fmt_str_parser {
         if (fmt.consume(':')) {
             auto format_spec_end = find_balanced_delimiter_end(fmt, '{', '}');
             range<CharT> format_spec(fmt.begin(), format_spec_end);
-            cb.replacement_field(replacement_field<CharT>{format_spec, arg_id});
+            cb.replacement_field(replacement_field<CharT>{arg_id, format_spec});
             fmt.advance_to(format_spec_end);
         } else
-            cb.replacement_field(replacement_field<CharT>{{}, arg_id});
-        return fmt.consume('}');
+            cb.replacement_field(replacement_field<CharT>{arg_id});
+        if (!fmt.consume('}'))
+            cb.error();
     }
 };
 
@@ -2367,13 +2363,14 @@ vformat_to_core(basic_format_context<Out, CharT>& context,
         constexpr void check_arg_id(std::size_t arg_id) {
             parse_context.check_arg_id(arg_id);
         }
+        [[noreturn]] void error() {
+            throw_format_error("invalid format string");
+        }
         basic_format_context<Out, CharT>& context;
         basic_format_parse_context<CharT>& parse_context;
     };
-    if (!fmt_str_parser<CharT>{{fmt}}.parse(
-              Callbacks{context, parse_context})) {
-        throw_format_error("invalid format string");
-    }
+    fmt_str_parser<CharT>{range<CharT>{fmt}}.parse(
+          Callbacks{context, parse_context});
     return context.out();
 }
 
