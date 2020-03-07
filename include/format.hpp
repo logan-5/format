@@ -769,9 +769,9 @@ struct range {
     iterator find(CharT c) const noexcept {
         LRSTD_ASSERT(_begin && _end);
         if (size() < 64)
-            return std::find(begin(), end(), c);
-        auto result = traits_type::find(begin(), size(), c);
-        return result ? result : end();
+            return std::find(_begin, _end, c);
+        auto result = traits_type::find(_begin, size(), c);
+        return result ? result : _end;
     }
 #endif
 
@@ -2215,7 +2215,7 @@ namespace detail {
 template <class CharT>
 struct replacement_field {
     range<CharT> format_spec;
-    arg_id_t arg_id;
+    std::size_t arg_id;
 };
 
 template <class CharT>
@@ -2275,16 +2275,16 @@ struct fmt_str_parser {
         LRSTD_ASSERT(!fmt.empty());
         if (fmt.consume_nonempty('}')) {
             cb.replacement_field(
-                  replacement_field<CharT>{{}, arg_id_t::auto_id()});
+                  replacement_field<CharT>{{}, cb.next_arg_id()});
             return true;
         }
         const parse_integer_result arg_value = parse_arg_id();
         if (arg_value.tag == parse_integer_result::type::error)
             return false;
-        const arg_id_t arg_id =
+        const std::size_t arg_id =
               arg_value.tag == parse_integer_result::type::none
-                    ? arg_id_t::auto_id()
-                    : arg_id_t{arg_value.integer};
+                    ? cb.next_arg_id()
+                    : (cb.check_arg_id(arg_value.integer), arg_value.integer);
         if (fmt.consume(':')) {
             auto format_spec_end = find_balanced_delimiter_end(fmt, '{', '}');
             range<CharT> format_spec(fmt.begin(), format_spec_end);
@@ -2359,12 +2359,13 @@ vformat_to_core(basic_format_context<Out, CharT>& context,
         constexpr void replacement_field(replacement_field<CharT> field) const {
             parse_context._begin = field.format_spec.begin();
             parse_context._end = field.format_spec.end();
-            arg_out(context, parse_context,
-                    context.arg(
-                          field.arg_id.is_auto()
-                                ? parse_context.next_arg_id()
-                                : (parse_context.check_arg_id(field.arg_id._id),
-                                   field.arg_id._id)));
+            arg_out(context, parse_context, context.arg(field.arg_id));
+        }
+        constexpr std::size_t next_arg_id() {
+            return parse_context.next_arg_id();
+        }
+        constexpr void check_arg_id(std::size_t arg_id) {
+            parse_context.check_arg_id(arg_id);
         }
         basic_format_context<Out, CharT>& context;
         basic_format_parse_context<CharT>& parse_context;
