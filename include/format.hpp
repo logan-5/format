@@ -121,8 +121,7 @@ using basic_string_view = std::basic_string_view<CharT>;
 
 template <class Out, class CharT>
 class basic_format_context;
-using format_context =
-      basic_format_context<detail::build_buf_iter<char>, char>;
+using format_context = basic_format_context<detail::build_buf_iter<char>, char>;
 using wformat_context =
       basic_format_context<detail::build_buf_iter<wchar_t>, wchar_t>;
 
@@ -197,21 +196,32 @@ class basic_format_parse_context {
     constexpr void advance_to(const_iterator it) noexcept { _begin = it; }
 
     constexpr std::size_t next_arg_id() {
-        if (_indexing != indexing::manual) {
-            _indexing = indexing::automatic;
-            return _next_arg_id++;
+        switch (_indexing) {
+            case indexing::unknown:
+                _indexing = indexing::automatic;
+                [[fallthrough]];
+            case indexing::automatic:
+                return _next_arg_id++;
+            case indexing::manual:
+                detail::throw_format_error(
+                      "mixing of automatic and manual argument indexing");
         }
-        detail::throw_format_error(
-              "mixing of automatic and manual argument indexing");
+        LRSTD_UNREACHABLE();
     }
     constexpr void check_arg_id(std::size_t id_) {
         if (id_ >= _num_args)
             ncc();
-        if (_indexing != indexing::automatic)
-            _indexing = indexing::manual;
-        else
-            detail::throw_format_error(
-                  "mixing of automatic and manual argument indexing");
+        switch (_indexing) {
+            case indexing::unknown:
+                _indexing = indexing::manual;
+                [[fallthrough]];
+            case indexing::manual:
+                return;
+            case indexing::automatic:
+                detail::throw_format_error(
+                      "mixing of automatic and manual argument indexing");
+        }
+        LRSTD_UNREACHABLE();
     }
 };
 
@@ -691,10 +701,17 @@ struct range {
 
     constexpr bool empty() const noexcept { return _begin == _end; }
     constexpr size_type size() const noexcept {
+        LRSTD_ASSERT(_begin && _end);
         return static_cast<std::size_t>(_end - _begin);
     }
-    constexpr iterator begin() const noexcept { return _begin; }
-    constexpr iterator end() const noexcept { return _end; }
+    constexpr iterator begin() const noexcept {
+        LRSTD_ASSERT(empty() || _begin);
+        return _begin;
+    }
+    constexpr iterator end() const noexcept {
+        LRSTD_ASSERT(empty() || _end);
+        return _end;
+    }
     constexpr auto rbegin() const noexcept {
         return std::make_reverse_iterator(end());
     }
@@ -702,18 +719,43 @@ struct range {
         return std::make_reverse_iterator(begin());
     }
 
-    constexpr void remove_prefix(size_type n) noexcept { _begin += n; }
+    constexpr void remove_prefix(size_type n) noexcept {
+        LRSTD_ASSERT(n <= size());
+        _begin += n;
+    }
 
-    constexpr CharT front() const noexcept { return *_begin; }
+    constexpr CharT front() const noexcept {
+        LRSTD_ASSERT(!empty());
+        return *_begin;
+    }
 
     constexpr range substr(size_type start) const noexcept {
+        LRSTD_ASSERT(_begin && _end);
+        LRSTD_ASSERT(start <= size());
         return range{_begin + start, _end};
     }
     constexpr range substr(size_type start, size_type count) const noexcept {
+        LRSTD_ASSERT(_begin && _end);
+        LRSTD_ASSERT(start <= size());
+        LRSTD_ASSERT(count <= size());
         return range{_begin + start, _begin + count};
     }
 
-    constexpr void advance_to(iterator it) noexcept { _begin = it; }
+    constexpr void advance_to(iterator it) noexcept {
+        LRSTD_ASSERT(in_range(it));
+        _begin = it;
+    }
+
+    constexpr bool in_range(iterator it) const noexcept {
+        if (!begin() || !end())
+            return false;
+        if (it == end())
+            return true;
+        for (iterator b = begin(); b != end(); ++b)
+            if (b == it)
+                return true;
+        return false;
+    }
 
 #if LRSTD_USE_EXTRA_CONSTEXPR
     constexpr iterator find(CharT c) const noexcept {
@@ -725,6 +767,7 @@ struct range {
     }
 #else
     iterator find(CharT c) const noexcept {
+        LRSTD_ASSERT(_begin && _end);
         if (size() < 64)
             return std::find(begin(), end(), c);
         auto result = traits_type::find(begin(), size(), c);
@@ -733,11 +776,12 @@ struct range {
 #endif
 
     constexpr basic_string_view<CharT> as_string_view() const noexcept {
-        return basic_string_view<CharT>(
-              _begin, static_cast<std::size_t>(_end - _begin));
+        LRSTD_ASSERT(_begin && _end);
+        return basic_string_view<CharT>(_begin, size());
     }
 
     constexpr bool match_nonempty(CharT c) const noexcept {
+        LRSTD_ASSERT(!empty());
         return *begin() == c;
     }
     constexpr bool match(CharT c) const noexcept {
@@ -745,6 +789,13 @@ struct range {
     }
     constexpr bool consume(CharT c) {
         if (match(c)) {
+            remove_prefix(1);
+            return true;
+        }
+        return false;
+    }
+    constexpr bool consume_nonempty(CharT c) {
+        if (match_nonempty(c)) {
             remove_prefix(1);
             return true;
         }
@@ -2173,53 +2224,56 @@ struct fmt_str_parser {
 
     template <class Callbacks>
     constexpr bool parse(Callbacks cb) {
-        auto write_text = [cb](range<CharT> text) {
-            while (!text.empty()) {
-                auto rbrace_it = text.find('}');
-                if (rbrace_it == text.end()) {
-                    cb.text(text);
-                    break;
-                }
-                ++rbrace_it;
-                if (rbrace_it == text.end() || *rbrace_it != '}')
-                    return false;
-                cb.text(range<CharT>{text.begin(), rbrace_it});
-                text.advance_to(rbrace_it + 1);
-            }
-            return true;
-        };
-
         while (!fmt.empty()) {
             const auto lbrace_it = fmt.find('{');
             if (lbrace_it == fmt.end()) {
-                return write_text(fmt);
+                return write_text(cb, fmt);
             }
             auto next = lbrace_it + 1;
             if (next == fmt.end())
                 return false;
-            if (*next == '{') {
-                write_text(range<CharT>{fmt.begin(), next});
-                fmt.advance_to(next + 1);
-            } else {
-                write_text(range<CharT>{fmt.begin(), lbrace_it});
+            if (*next != '{') {
+                write_text(cb, range<CharT>{fmt.begin(), lbrace_it});
                 fmt.advance_to(next);
                 if (!parse_replacement_field(cb))
                     return false;
+            } else {
+                write_text(cb, range<CharT>{fmt.begin(), next});
+                fmt.advance_to(next + 1);
             }
         }
         return true;
     }
 
    private:
+    template <class Callbacks>
+    static constexpr bool write_text(Callbacks cb, range<CharT> text) {
+        while (!text.empty()) {
+            auto rbrace_it = text.find('}');
+            if (rbrace_it == text.end()) {
+                cb.text(text);
+                break;
+            }
+            ++rbrace_it;
+            if (rbrace_it == text.end() || *rbrace_it != '}')
+                return false;
+            cb.text(range<CharT>{text.begin(), rbrace_it});
+            text.advance_to(rbrace_it + 1);
+        }
+        return true;
+    }
+
     constexpr parse_integer_result parse_arg_id() {
-        if (fmt.consume('0'))
+        LRSTD_ASSERT(!fmt.empty());
+        if (fmt.consume_nonempty('0'))
             return 0;
         return parse_integer(fmt);
     }
 
     template <class Callbacks>
     constexpr bool parse_replacement_field(Callbacks cb) {
-        if (fmt.consume('}')) {
+        LRSTD_ASSERT(!fmt.empty());
+        if (fmt.consume_nonempty('}')) {
             cb.replacement_field(
                   replacement_field<CharT>{{}, arg_id_t::auto_id()});
             return true;
