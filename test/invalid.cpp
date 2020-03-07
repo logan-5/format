@@ -10,7 +10,18 @@ TEMPLATE_TEST_CASE("invalid", "", char, wchar_t) {
     using lrstd::format;
     str_fn<TestType> str;
 
-    for (auto& pattern : {str("{:0}"), str("{:500}"), str("{}"), str("{:}")}) {
+    for (auto& pattern : {
+               str("{}"),
+               str("{:}"),
+               str("{0}"),
+               str("{500}"),
+               str("{0:}"),
+               str("{500:}"),
+               str("{0:0}"),
+               str("{500:500}"),
+               str("{:0}"),
+               str("{:500}"),
+         }) {
         CHECK_THROWS_AS(format(pattern), lrstd::format_error);
         CHECK(format(str("{}"), pattern) == pattern);
     }
@@ -20,9 +31,28 @@ TEMPLATE_TEST_CASE("parse_errors", "", char, wchar_t) {
     using lrstd::format;
     str_fn<TestType> str;
 
-    for (auto& pattern : {str("{:.}"), str("{:00}"), str("{:x0}"), str("{:x#}"),
-                          str("{:LL}")}) {
+    for (auto& pattern : {
+               str("}{"),
+               str("{:.}"),
+               str("{:00}"),
+               str("{:x0}"),
+               str("{:x#}"),
+               str("{:LL}"),
+               str("{"),
+               str("}"),
+               str("{}}"),
+               str("cold{brew"),
+               str("cold}brew"),
+               str("coldbrew}"),
+               str("coldbrew{"),
+               str("{coldbrew"),
+               str("}coldbrew"),
+               str("{}coldbrew{"),
+               str("{}coldbrew}"),
+               str("{:{{}"),
+         }) {
         CHECK_THROWS_AS(format(pattern, 5), lrstd::format_error);
+        CHECK(format(str("{}"), pattern) == pattern);
     }
 }
 

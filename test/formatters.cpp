@@ -136,16 +136,16 @@ TEMPLATE_TEST_CASE("escaping", "[formatters]", char, wchar_t) {
     CHECK(format(str("{{{{")) == str("{{"));
     CHECK(format(str("}}}}")) == str("}}"));
 
-    CHECK_THROWS_AS(format(str("{")), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("}")), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{}}")), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("asdf{asdf")), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("asdf}asdf")), lrstd::format_error);
-
     CHECK(format(str("{}{{"), 5) == str("5{"));
     CHECK(format(str("{}}}"), 5) == str("5}"));
     CHECK(format(str("{}a{{"), 5) == str("5a{"));
     CHECK(format(str("{}a}}"), 5) == str("5a}"));
+    CHECK(format(str("aa{}a{{aa"), 5) == str("aa5a{aa"));
+    CHECK(format(str("aa{}a}}aa"), 5) == str("aa5a}aa"));
+    CHECK(format(str("aa{{{}a{{aa"), 5) == str("aa{5a{aa"));
+    CHECK(format(str("aa}}{}a}}aa"), 5) == str("aa}5a}aa"));
+    CHECK(format(str("aa{{{}a}}aa"), 5) == str("aa{5a}aa"));
+    CHECK(format(str("aa}}{}a{{aa"), 5) == str("aa}5a{aa"));
 }
 
 TEMPLATE_TEST_CASE("dynamic_width", "[formatters]", char, wchar_t) {
