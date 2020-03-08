@@ -26,7 +26,7 @@ struct en_US_locale {
 struct en_US_funky_locale {
     inline std::locale operator()() const {
         std::locale loc(std::locale(), new en_US_funky_facet<char>);
-        loc.combine<en_US_facet<wchar_t>>(
+        loc.combine<en_US_funky_facet<wchar_t>>(
               std::locale(std::locale(), new en_US_funky_facet<wchar_t>));
         return loc;
     }
