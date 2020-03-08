@@ -24,7 +24,7 @@ class build_buf_iter
     explicit build_buf_iter(std::basic_string<CharT>& s) : base(s) {}
 
     build_buf_iter& write(std::basic_string_view<CharT> sv) {
-        container->append(sv.data(), sv.size());
+        container->append(sv);
         return *this;
     }
     template <class C, class T>
