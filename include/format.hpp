@@ -1659,7 +1659,10 @@ class integer_locale_writer {
             return size;
         const auto last = std::prev(grouping.cend());
         for (auto it = grouping.cbegin(); it != last; ++it) {
-            const auto group_size = static_cast<std::size_t>(*it);
+            const char c = *it;
+            if (c <= 0 || c == CHAR_MAX)
+                return size;
+            const auto group_size = static_cast<std::size_t>(c);
             if (group_size >= str.size())
                 return size;
             str.remove_prefix(group_size);
@@ -1685,15 +1688,22 @@ class integer_locale_writer {
         LRSTD_ASSERT(!str.empty());
         std::size_t first_groups_size = 0;
         auto last_group_it = grouping.cbegin();
-        for (; last_group_it != grouping.cend() - 1; ++last_group_it) {
-            const auto group_size = static_cast<std::size_t>(*last_group_it);
-            first_groups_size += group_size;
+        char last_group_char = *last_group_it;
+        std::size_t last_group_size = static_cast<std::size_t>(last_group_char);
+        for (; last_group_it != grouping.cend() - 1;
+             ++last_group_it,
+             last_group_char = *last_group_it,
+             last_group_size = static_cast<std::size_t>(last_group_char)) {
+            if (last_group_char <= 0 || last_group_char == CHAR_MAX) {
+                last_group_size = std::numeric_limits<std::size_t>::max();
+                break;
+            }
+            first_groups_size += last_group_size;
             if (first_groups_size >= str.size()) {
-                first_groups_size -= group_size;
+                first_groups_size -= last_group_size;
                 break;
             }
         }
-        const auto last_group_size = static_cast<std::size_t>(*last_group_it);
         auto chars_in_last_group = str.size() - first_groups_size;
 
         auto remainder = chars_in_last_group % last_group_size;

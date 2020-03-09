@@ -276,6 +276,39 @@ TEMPLATE_TEST_CASE("int_locale",
     CHECK(format(loc, str("{:Lb}"), 10000) == str("10,011,100,010,000"));
 }
 
+#include <sstream>
+
+TEMPLATE_TEST_CASE("int_embedded_null_locale", "", char, wchar_t) {
+    using lrstd::format;
+    using charT = TestType;
+    str_fn<charT> str;
+
+#define CHECK_MATCHES_OSTREAM(NUMBER, RESULT)                  \
+    do {                                                       \
+        CHECK(format(loc, str("{:L}"), (NUMBER)) == (RESULT)); \
+        std::basic_ostringstream<charT> os;                    \
+        os.imbue(loc);                                         \
+        os << NUMBER;                                          \
+        CHECK(os.str() == (RESULT));                           \
+    } while (false)
+
+    for (const auto& loc :
+         {embedded_null_locale{}(), embedded_char_max_locale{}(),
+          embedded_negative_char_locale{}()}) {
+        CHECK_MATCHES_OSTREAM(123, str("1%23"));
+        CHECK_MATCHES_OSTREAM(1234, str("1%2%34"));
+        CHECK_MATCHES_OSTREAM(12345, str("12%3%45"));
+        CHECK_MATCHES_OSTREAM(1234567, str("1234%5%67"));
+
+        CHECK(format(loc, str("{:^10L}"), 123) == str("   1%23   "));
+        CHECK(format(loc, str("{:^10L}"), 1234) == str("  1%2%34  "));
+        CHECK(format(loc, str("{:^10L}"), 12345) == str(" 12%3%45  "));
+        CHECK(format(loc, str("{:^10L}"), 1234567) == str("1234%5%67 "));
+    }
+
+#undef CHECK_MATCHES_OSTREAM
+}
+
 TEMPLATE_TEST_CASE("int_cppreference_examples", "", char, wchar_t) {
     using lrstd::format;
     using charT = TestType;
