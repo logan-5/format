@@ -1,5 +1,6 @@
 #include "converter.hpp"
 #include "format.hpp"
+#include "locales.hpp"
 #include "user_defined.hpp"
 
 #include <catch.hpp>
@@ -76,7 +77,7 @@ TEMPLATE_TEST_CASE("format_to_n", "", char, wchar_t) {
     }
     {
         std::basic_string<TestType> chars;
-        std::locale::global(std::locale("en_US"));
+        std::locale::global(en_US_locale{}());
         auto result = format_to_n(std::back_inserter(chars), 4, "{:L}", 1234);
         CHECK(chars == str("1,23"));
         CHECK(result.size == 5);

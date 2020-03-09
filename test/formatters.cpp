@@ -1,5 +1,6 @@
 #include "converter.hpp"
 #include "format.hpp"
+#include "locales.hpp"
 
 #include <string>
 #include <string_view>
@@ -87,7 +88,7 @@ TEMPLATE_TEST_CASE("formatters", "[formatters]", char, wchar_t) {
         CHECK(format(str("{:L}"), 123llu) == str("123"));
     }
     {
-        std::locale::global(std::locale("en_US"));
+        std::locale::global(en_US_locale{}());
         CHECK(format(str("{:L}"), 12345) == str("12,345"));
         CHECK(format(str("{:L}"), 12345u) == str("12,345"));
         CHECK(format(str("{:L}"), 12345l) == str("12,345"));

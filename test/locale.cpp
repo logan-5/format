@@ -52,10 +52,10 @@ TEMPLATE_TEST_CASE("locale_std_examples", "", char, wchar_t) {
         // TODO
         // double inf = std::numeric_limits<double>::infinity();
         // double nan = std::numeric_limits<double>::quiet_NaN();
-        // CHECK(format(std::locale("C" ), "{0:},{0:+},{0:-},{0: }", 1) == "1,+1,1, 1");
-        // CHECK(format(std::locale("C" ), "{0:},{0:+},{0:-},{0: }", -1) == "-1,-1,-1,-1");
-        // CHECK(format(std::locale("C" ), "{0:},{0:+},{0:-},{0: }", inf) == "inf,+inf,inf, inf");
-        // CHECK(format(std::locale("C" ), "{0:},{0:+},{0:-},{0: }", nan) == "nan,+nan,nan, nan");
+        // CHECK(format(std::locale::classic(), "{0:},{0:+},{0:-},{0: }", 1) == "1,+1,1, 1");
+        // CHECK(format(std::locale::classic(), "{0:},{0:+},{0:-},{0: }", -1) == "-1,-1,-1,-1");
+        // CHECK(format(std::locale::classic(), "{0:},{0:+},{0:-},{0: }", inf) == "inf,+inf,inf, inf");
+        // CHECK(format(std::locale::classic(), "{0:},{0:+},{0:-},{0: }", nan) == "nan,+nan,nan, nan");
 
           // clang-format on
     }
@@ -79,7 +79,7 @@ TEMPLATE_TEST_CASE("locale_std_examples", "", char, wchar_t) {
 
         // clang-format off
         // TODO
-        // CHECK(format(std::locale("C" ), "{:L}", 1234) == "1,234");  // (depending on the locale)
+        // CHECK(format(std::locale::classic(), "{:L}", 1234) == "1,234");  // (depending on the locale)
         // clang-format on
     }
     { CHECK(format(std::locale::classic(), str("{}"), red) == str("red")); }

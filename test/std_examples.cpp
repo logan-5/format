@@ -1,6 +1,7 @@
 #include "format.hpp"
 
 #include "converter.hpp"
+#include "locales.hpp"
 #include "user_defined.hpp"
 
 #include <catch.hpp>
@@ -59,7 +60,7 @@ TEMPLATE_TEST_CASE("std_examples", "", char, wchar_t) {
               str("101010 42 52 2a"));
         CHECK(format(str("{0:#x} {0:#X}"), 42) == str("0x2a 0X2A"));
 
-        std::locale::global(std::locale("en_US"));
+        std::locale::global(en_US_locale{}());
         CHECK(format("{:L}", 1234) == "1,234");
     }
     { CHECK(format(str("{}"), red) == str("red")); }

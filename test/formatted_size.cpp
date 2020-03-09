@@ -1,5 +1,6 @@
 #include "converter.hpp"
 #include "format.hpp"
+#include "locales.hpp"
 #include "user_defined.hpp"
 
 #include <string>
@@ -68,7 +69,7 @@ TEMPLATE_TEST_CASE("formatted_size", "", char, wchar_t) {
         CHECK(formatted_size(str("{0:b} {0:d} {0:o} {0:x}"), 42) == 15);
         CHECK(formatted_size(str("{0:#x} {0:#X}"), 42) == 9);
 
-        std::locale::global(std::locale("en_US"));
+        std::locale::global(en_US_locale{}());
         CHECK(formatted_size("{:L}", 1234) == 5);
     }
     { CHECK(formatted_size(str("{}"), red) == 3); }
