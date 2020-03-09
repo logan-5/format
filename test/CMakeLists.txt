@@ -31,12 +31,13 @@ set(source_files
     test.cpp
 )
 
+set(SANITIZER_FLAGS "")
 
 option(ASAN "ASAN" OFF)
 if (ASAN)
     message("-- enabling address sanitizer")
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+        set(SANITIZER_FLAGS "${SANITIZER_FLAGS}address,")
     else (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         message("address sanitizer not supported for this compiler")
     endif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -48,13 +49,15 @@ option(UBSAN "UBSAN" OFF)
 if (UBSAN)
     message("-- enabling undefined behavior sanitizer")
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
+    set(SANITIZER_FLAGS "${SANITIZER_FLAGS}undefined,")
     else (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         message("undefined behavior sanitizer not supported for this compiler")
     endif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 else (UBSAN)
     message("-- not enabling undefined behavior sanitizer")
 endif (UBSAN)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=${SANITIZER_FLAGS}")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wextra -pedantic -Wno-missing-field-initializers -Wconversion")
 add_executable(format_test ${source_files})
