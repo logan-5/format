@@ -14,20 +14,13 @@ struct en_US_funky_facet : std::numpunct<CharT> {
     std::string do_grouping() const override { return "\3\3\3\3\3"; }
 };
 
-struct en_US_locale {
-    inline std::locale operator()() const {
-        std::locale loc(std::locale(), new en_US_facet<char>);
-        loc.combine<en_US_facet<wchar_t>>(
-              std::locale(std::locale(), new en_US_facet<wchar_t>));
-        return loc;
+template <template <class> class Facet>
+struct locale_with_facet {
+    std::locale operator()() const {
+        std::locale loc(std::locale::classic(), new Facet<char>);
+        return std::locale(loc, new Facet<wchar_t>);
     }
 };
 
-struct en_US_funky_locale {
-    inline std::locale operator()() const {
-        std::locale loc(std::locale(), new en_US_funky_facet<char>);
-        loc.combine<en_US_funky_facet<wchar_t>>(
-              std::locale(std::locale(), new en_US_funky_facet<wchar_t>));
-        return loc;
-    }
-};
+using en_US_locale = locale_with_facet<en_US_facet>;
+using en_US_funky_locale = locale_with_facet<en_US_funky_facet>;
