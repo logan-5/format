@@ -59,21 +59,30 @@ TEMPLATE_TEST_CASE("type_parsing_bug", "", char, wchar_t) {
     CHECK_THROWS_AS(format(str("{:aAbBcdeEfFgGnop}"), 5), lrstd::format_error);
 }
 
+#define CHECK_TYPE_VERIFIER(FMT, ARG)                                  \
+    do {                                                               \
+        using T = std::decay_t<decltype(ARG)>;                         \
+        str_fn<charT> str;                                             \
+        auto fmt = str(FMT);                                           \
+        CHECK_THROWS_AS(lrstd::format(fmt, ARG), lrstd::format_error); \
+        [[maybe_unused]] lrstd::formatter<T, charT> formatter;         \
+    } while (false)
+
 TEMPLATE_TEST_CASE("invalid_int", "", char, wchar_t) {
     using lrstd::format;
-    str_fn<TestType> str;
-    CHECK_THROWS_AS(format(str("{:.1}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:c}"), 500), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:s}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:a}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:A}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:e}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:f}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:F}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:g}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:G}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:n}"), 5), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:p}"), 5), lrstd::format_error);
+    using charT = TestType;
+    CHECK_TYPE_VERIFIER("{:.1}", 5);
+    CHECK_TYPE_VERIFIER("{:c}", 500);
+    CHECK_TYPE_VERIFIER("{:s}", 5);
+    CHECK_TYPE_VERIFIER("{:a}", 5);
+    CHECK_TYPE_VERIFIER("{:A}", 5);
+    CHECK_TYPE_VERIFIER("{:e}", 5);
+    CHECK_TYPE_VERIFIER("{:f}", 5);
+    CHECK_TYPE_VERIFIER("{:F}", 5);
+    CHECK_TYPE_VERIFIER("{:g}", 5);
+    CHECK_TYPE_VERIFIER("{:G}", 5);
+    CHECK_TYPE_VERIFIER("{:n}", 5);
+    CHECK_TYPE_VERIFIER("{:p}", 5);
 }
 
 TEMPLATE_TEST_CASE("invalid_nonarithmetic",
@@ -90,52 +99,53 @@ TEMPLATE_TEST_CASE("invalid_nonarithmetic",
                    (std::tuple<wchar_t, void*>)) {
     using lrstd::format;
 
-    using CharType = std::tuple_element_t<0, TestType>;
+    using charT = std::tuple_element_t<0, TestType>;
     using FormatteeType = std::tuple_element_t<1, TestType>;
 
-    str_fn<CharType> str;
+    str_fn<charT> str;
 
     FormatteeType c = {};
 
-    CHECK_THROWS_AS(format(str("{:+}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:-}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{: }"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:#}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:+#}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:-#}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{: #}"), c), lrstd::format_error);
+    CHECK_TYPE_VERIFIER("{:+}", c);
+    CHECK_TYPE_VERIFIER("{:-}", c);
+    CHECK_TYPE_VERIFIER("{: }", c);
+    CHECK_TYPE_VERIFIER("{:#}", c);
+    CHECK_TYPE_VERIFIER("{:+#}", c);
+    CHECK_TYPE_VERIFIER("{:-#}", c);
+    CHECK_TYPE_VERIFIER("{: #}", c);
 
-    CHECK_THROWS_AS(format(str("{:0}"), c), lrstd::format_error);
+    CHECK_TYPE_VERIFIER("{:0}", c);
     CHECK_NOTHROW(format(str("{:<0}"), c));
 
-    CHECK_THROWS_AS(format(str("{:a}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:A}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:e}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:f}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:F}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:g}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:G}"), c), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:n}"), c), lrstd::format_error);
+    CHECK_TYPE_VERIFIER("{:a}", c);
+    CHECK_TYPE_VERIFIER("{:A}", c);
+    CHECK_TYPE_VERIFIER("{:e}", c);
+    CHECK_TYPE_VERIFIER("{:f}", c);
+    CHECK_TYPE_VERIFIER("{:F}", c);
+    CHECK_TYPE_VERIFIER("{:g}", c);
+    CHECK_TYPE_VERIFIER("{:G}", c);
+    CHECK_TYPE_VERIFIER("{:n}", c);
 }
 
 TEMPLATE_TEST_CASE("invalid_nonarthmetic_nongeneric", "", char, wchar_t) {
     using lrstd::format;
-    str_fn<TestType> str;
-    CHECK_THROWS_AS(format(str("{:s}"), str('x')), lrstd::format_error);
+    using charT = TestType;
+    str_fn<charT> str;
+    CHECK_TYPE_VERIFIER("{:s}", str('x'));
 
-    CHECK_THROWS_AS(format(str("{:.1}"), str('x')), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:.1}"), false), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:p}"), str('x')), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:p}"), false), lrstd::format_error);
+    CHECK_TYPE_VERIFIER("{:.1}", str('x'));
+    CHECK_TYPE_VERIFIER("{:.1}", false);
+    CHECK_TYPE_VERIFIER("{:p}", str('x'));
+    CHECK_TYPE_VERIFIER("{:p}", false);
 
-    CHECK_THROWS_AS(format(str("{:c}"), str("")), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:p}"), str("")), lrstd::format_error);
+    CHECK_TYPE_VERIFIER("{:c}", str(""));
+    CHECK_TYPE_VERIFIER("{:p}", str(""));
 
-    CHECK_THROWS_AS(format(str("{:c}"), (void*)nullptr), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:s}"), (void*)nullptr), lrstd::format_error);
+    CHECK_TYPE_VERIFIER("{:c}", (void*)nullptr);
+    CHECK_TYPE_VERIFIER("{:s}", (void*)nullptr);
 
-    CHECK_THROWS_AS(format(str("{:L}"), str('x')), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:L}"), str("x")), lrstd::format_error);
-    CHECK_THROWS_AS(format(str("{:L}"), (void*)nullptr), lrstd::format_error);
+    CHECK_TYPE_VERIFIER("{:L}", str('x'));
+    CHECK_TYPE_VERIFIER("{:L}", str("x"));
+    CHECK_TYPE_VERIFIER("{:L}", (void*)nullptr);
     CHECK_NOTHROW(format(str("{:L}"), false));
 }
