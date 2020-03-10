@@ -59,13 +59,26 @@ TEMPLATE_TEST_CASE("type_parsing_bug", "", char, wchar_t) {
     CHECK_THROWS_AS(format(str("{:aAbBcdeEfFgGnop}"), 5), lrstd::format_error);
 }
 
+TEMPLATE_TEST_CASE("invalid_dynamic_width_precision", "", char, wchar_t) {
+    using lrstd::format;
+    str_fn<TestType> str;
+
+    CHECK(format(str("{:{}}"), 5, 6) == str("     5"));
+    CHECK_THROWS_AS(format(str("{:{}}"), 5, str("hello")), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{:{}}"), 5, -6), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{0:{1}}"), 5, str("hello")),
+                    lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{0:{1}}"), 5, -6), lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{1:{0}}"), -5, str("hello")),
+                    lrstd::format_error);
+    CHECK_THROWS_AS(format(str("{1:{0}}"), str("5"), -6), lrstd::format_error);
+}
+
 #define CHECK_TYPE_VERIFIER(FMT, ARG)                                  \
     do {                                                               \
-        using T = std::decay_t<decltype(ARG)>;                         \
         str_fn<charT> str;                                             \
         auto fmt = str(FMT);                                           \
         CHECK_THROWS_AS(lrstd::format(fmt, ARG), lrstd::format_error); \
-        [[maybe_unused]] lrstd::formatter<T, charT> formatter;         \
     } while (false)
 
 TEMPLATE_TEST_CASE("invalid_int", "", char, wchar_t) {
