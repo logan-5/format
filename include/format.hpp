@@ -1118,15 +1118,16 @@ struct std_spec_parser {
           range<CharT>& s) {
         if (s.match('{')) {
             auto next = s.substr(1);
-            if (const parse_integer_result result = parse_integer(next)) {
+            if (next.consume('}')) {
+                s = next;
+                return arg_id_t{parse_context.next_arg_id()};
+            } else if (const parse_integer_result result =
+                             parse_integer(next)) {
                 if (next.consume('}')) {
                     s = next;
                     parse_context.check_arg_id(result.integer);
                     return arg_id_t{result.integer};
                 }
-            } else if (next.consume('}')) {
-                s = next;
-                return arg_id_t{parse_context.next_arg_id()};
             }
         }
         if (const parse_integer_result result = parse_integer(s)) {
