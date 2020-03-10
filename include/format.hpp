@@ -154,6 +154,132 @@ template <class CharT, class Out>
 LRSTD_EXTRA_CONSTEXPR Out
 vformat_to_core(basic_format_context<Out, CharT>& context,
                 basic_string_view<CharT> fmt_sv);
+
+template <class CharT>
+struct range {
+    using char_type = CharT;
+    using iterator = const CharT*;
+    using const_iterator = const CharT*;
+    using size_type = std::size_t;
+    using traits_type = std::char_traits<CharT>;
+
+    constexpr range() noexcept : _begin{nullptr}, _end{nullptr} {}
+    constexpr range(const CharT* begin, const CharT* end) noexcept
+        : _begin{begin}, _end{end} {}
+    constexpr range(basic_string_view<CharT> sv) noexcept
+        : _begin{sv.data()}, _end{sv.data() + sv.size()} {}
+
+    constexpr bool empty() const noexcept { return _begin == _end; }
+    constexpr size_type size() const noexcept {
+        LRSTD_ASSERT(_begin && _end);
+        return static_cast<std::size_t>(_end - _begin);
+    }
+    constexpr iterator begin() const noexcept {
+        LRSTD_ASSERT(empty() || _begin);
+        return _begin;
+    }
+    constexpr iterator end() const noexcept {
+        LRSTD_ASSERT(empty() || _end);
+        return _end;
+    }
+    constexpr auto rbegin() const noexcept {
+        return std::make_reverse_iterator(end());
+    }
+    constexpr auto rend() const noexcept {
+        return std::make_reverse_iterator(begin());
+    }
+
+    constexpr void remove_prefix(size_type n) noexcept {
+        LRSTD_ASSERT(n <= size());
+        _begin += n;
+    }
+
+    constexpr CharT front() const noexcept {
+        LRSTD_ASSERT(!empty());
+        return *_begin;
+    }
+
+    constexpr range substr(size_type start) const noexcept {
+        LRSTD_ASSERT(_begin && _end);
+        LRSTD_ASSERT(start <= size());
+        return range{_begin + start, _end};
+    }
+    constexpr range substr(size_type start, size_type count) const noexcept {
+        LRSTD_ASSERT(_begin && _end);
+        LRSTD_ASSERT(start <= size());
+        LRSTD_ASSERT(count <= size());
+        return range{_begin + start, _begin + count};
+    }
+
+    constexpr void advance_to(iterator it) noexcept {
+        LRSTD_ASSERT(in_range(it));
+        _begin = it;
+    }
+
+    constexpr bool in_range(iterator it) const noexcept {
+        if (!begin() || !end())
+            return false;
+        if (it == end())
+            return true;
+        for (iterator b = begin(); b != end(); ++b)
+            if (b == it)
+                return true;
+        return false;
+    }
+
+#if LRSTD_USE_EXTRA_CONSTEXPR
+    constexpr iterator find(CharT c) const noexcept {
+        for (iterator it = _begin; it != _end; ++it) {
+            if (*it == c)
+                return it;
+        }
+        return _end;
+    }
+#else
+    iterator find(CharT c) const noexcept {
+        LRSTD_ASSERT(_begin && _end);
+        if (size() < 64)
+            return std::find(_begin, _end, c);
+        auto result = traits_type::find(_begin, size(), c);
+        return result ? result : _end;
+    }
+#endif
+
+    constexpr basic_string_view<CharT> as_string_view() const noexcept {
+        LRSTD_ASSERT(_begin && _end);
+        return basic_string_view<CharT>(_begin, size());
+    }
+
+    constexpr bool match_nonempty(CharT c) const noexcept {
+        LRSTD_ASSERT(!empty());
+        return *begin() == c;
+    }
+    constexpr bool match(CharT c) const noexcept {
+        return !empty() && match_nonempty(c);
+    }
+    constexpr bool consume(CharT c) {
+        if (match(c)) {
+            remove_prefix(1);
+            return true;
+        }
+        return false;
+    }
+    constexpr bool consume_nonempty(CharT c) {
+        if (match_nonempty(c)) {
+            remove_prefix(1);
+            return true;
+        }
+        return false;
+    }
+
+   private:
+    const CharT* _begin;
+    const CharT* _end;
+};
+
+template <class>
+struct fmt_str_parser;
+
 }  // namespace detail
 
 template <class CharT>
@@ -164,8 +290,7 @@ class basic_format_parse_context {
     using iterator = const_iterator;
 
    private:
-    iterator _begin;
-    iterator _end;
+    detail::range<CharT> _rng;
     enum class indexing : char { unknown, manual, automatic };
     indexing _indexing;
     std::size_t _next_arg_id;
@@ -178,11 +303,13 @@ class basic_format_parse_context {
     detail::vformat_to_core(basic_format_context<O, C>& context,
                             basic_string_view<C> fmt_sv);
 
+    template <class>
+    friend struct detail::fmt_str_parser;
+
    public:
     explicit constexpr basic_format_parse_context(basic_string_view<CharT> fmt,
                                                   size_t num_args = 0) noexcept
-        : _begin{fmt.begin()}
-        , _end{fmt.end()}
+        : _rng{fmt}
         , _indexing{indexing::unknown}
         , _next_arg_id{0}
         , _num_args{num_args} {}
@@ -191,9 +318,11 @@ class basic_format_parse_context {
     basic_format_parse_context& operator=(const basic_format_parse_context&) =
           delete;
 
-    constexpr const_iterator begin() const noexcept { return _begin; }
-    constexpr const_iterator end() const noexcept { return _end; }
-    constexpr void advance_to(const_iterator it) noexcept { _begin = it; }
+    constexpr const_iterator begin() const noexcept { return _rng.begin(); }
+    constexpr const_iterator end() const noexcept { return _rng.end(); }
+    constexpr void advance_to(const_iterator it) noexcept {
+        _rng.advance_to(it);
+    }
 
     constexpr std::size_t next_arg_id() {
         switch (_indexing) {
@@ -685,128 +814,6 @@ make_wformat_args(const Args&... args) {
 
 namespace detail {
 
-template <class CharT>
-struct range {
-    using char_type = CharT;
-    using iterator = const CharT*;
-    using const_iterator = const CharT*;
-    using size_type = std::size_t;
-    using traits_type = std::char_traits<CharT>;
-
-    constexpr range() noexcept : _begin{nullptr}, _end{nullptr} {}
-    constexpr range(const CharT* begin, const CharT* end) noexcept
-        : _begin{begin}, _end{end} {}
-    constexpr range(basic_string_view<CharT> sv) noexcept
-        : _begin{sv.data()}, _end{sv.data() + sv.size()} {}
-
-    constexpr bool empty() const noexcept { return _begin == _end; }
-    constexpr size_type size() const noexcept {
-        LRSTD_ASSERT(_begin && _end);
-        return static_cast<std::size_t>(_end - _begin);
-    }
-    constexpr iterator begin() const noexcept {
-        LRSTD_ASSERT(empty() || _begin);
-        return _begin;
-    }
-    constexpr iterator end() const noexcept {
-        LRSTD_ASSERT(empty() || _end);
-        return _end;
-    }
-    constexpr auto rbegin() const noexcept {
-        return std::make_reverse_iterator(end());
-    }
-    constexpr auto rend() const noexcept {
-        return std::make_reverse_iterator(begin());
-    }
-
-    constexpr void remove_prefix(size_type n) noexcept {
-        LRSTD_ASSERT(n <= size());
-        _begin += n;
-    }
-
-    constexpr CharT front() const noexcept {
-        LRSTD_ASSERT(!empty());
-        return *_begin;
-    }
-
-    constexpr range substr(size_type start) const noexcept {
-        LRSTD_ASSERT(_begin && _end);
-        LRSTD_ASSERT(start <= size());
-        return range{_begin + start, _end};
-    }
-    constexpr range substr(size_type start, size_type count) const noexcept {
-        LRSTD_ASSERT(_begin && _end);
-        LRSTD_ASSERT(start <= size());
-        LRSTD_ASSERT(count <= size());
-        return range{_begin + start, _begin + count};
-    }
-
-    constexpr void advance_to(iterator it) noexcept {
-        LRSTD_ASSERT(in_range(it));
-        _begin = it;
-    }
-
-    constexpr bool in_range(iterator it) const noexcept {
-        if (!begin() || !end())
-            return false;
-        if (it == end())
-            return true;
-        for (iterator b = begin(); b != end(); ++b)
-            if (b == it)
-                return true;
-        return false;
-    }
-
-#if LRSTD_USE_EXTRA_CONSTEXPR
-    constexpr iterator find(CharT c) const noexcept {
-        for (iterator it = _begin; it != _end; ++it) {
-            if (*it == c)
-                return it;
-        }
-        return _end;
-    }
-#else
-    iterator find(CharT c) const noexcept {
-        LRSTD_ASSERT(_begin && _end);
-        if (size() < 64)
-            return std::find(_begin, _end, c);
-        auto result = traits_type::find(_begin, size(), c);
-        return result ? result : _end;
-    }
-#endif
-
-    constexpr basic_string_view<CharT> as_string_view() const noexcept {
-        LRSTD_ASSERT(_begin && _end);
-        return basic_string_view<CharT>(_begin, size());
-    }
-
-    constexpr bool match_nonempty(CharT c) const noexcept {
-        LRSTD_ASSERT(!empty());
-        return *begin() == c;
-    }
-    constexpr bool match(CharT c) const noexcept {
-        return !empty() && match_nonempty(c);
-    }
-    constexpr bool consume(CharT c) {
-        if (match(c)) {
-            remove_prefix(1);
-            return true;
-        }
-        return false;
-    }
-    constexpr bool consume_nonempty(CharT c) {
-        if (match_nonempty(c)) {
-            remove_prefix(1);
-            return true;
-        }
-        return false;
-    }
-
-   private:
-    const CharT* _begin;
-    const CharT* _end;
-};
-
 struct parse_integer_result {
     union {
         std::monostate _;
@@ -1178,11 +1185,14 @@ struct std_formatter_driver {
 
     constexpr typename basic_format_parse_context<CharT>::iterator parse(
           basic_format_parse_context<CharT>& pc) {
-        if (pc.begin() != pc.end()) {
+        auto anything_to_parse = [&pc] {
+            return pc.begin() != pc.end() && *pc.begin() != '}';
+        };
+        if (anything_to_parse()) {
             spec.emplace();
             std_spec_parser<CharT>{pc, *spec}.parse();
-            if (pc.begin() != pc.end())
-                throw_format_error("bad standard format spec string");
+            if (anything_to_parse())
+                throw_format_error("failed to parse format spec string");
         }
         return pc.begin();
     }
@@ -2233,10 +2243,11 @@ struct replacement_field {
 
 template <class CharT>
 struct fmt_str_parser {
-    range<CharT> fmt;
+    basic_format_parse_context<CharT>& pc;
 
     template <class Callbacks>
     constexpr void parse(Callbacks cb) {
+        range<CharT>& fmt = pc._rng;
         while (!fmt.empty()) {
             const auto lbrace_it = fmt.find('{');
             if (lbrace_it == fmt.end())
@@ -2271,6 +2282,7 @@ struct fmt_str_parser {
     }
 
     constexpr parse_integer_result parse_arg_id() {
+        range<CharT>& fmt = pc._rng;
         LRSTD_ASSERT(!fmt.empty());
         if (fmt.consume_nonempty('0'))
             return 0;
@@ -2279,24 +2291,22 @@ struct fmt_str_parser {
 
     template <class Callbacks>
     constexpr void parse_replacement_field(Callbacks cb) {
+        range<CharT>& fmt = pc._rng;
         LRSTD_ASSERT(!fmt.empty());
-        if (fmt.consume_nonempty('}'))
-            return cb.replacement_field(
-                  replacement_field<CharT>{cb.next_arg_id()});
-        const parse_integer_result arg_value = parse_arg_id();
-        if (arg_value.tag == parse_integer_result::type::error)
-            return cb.error();
-        const std::size_t arg_id =
-              arg_value.tag == parse_integer_result::type::none
-                    ? cb.next_arg_id()
-                    : (cb.check_arg_id(arg_value.integer), arg_value.integer);
-        if (fmt.consume(':')) {
-            auto format_spec_end = find_balanced_delimiter_end(fmt, '{', '}');
-            range<CharT> format_spec(fmt.begin(), format_spec_end);
-            cb.replacement_field(replacement_field<CharT>{arg_id, format_spec});
-            fmt.advance_to(format_spec_end);
-        } else
+        if (fmt.match_nonempty('}')) {
+            cb.replacement_field(replacement_field<CharT>{pc.next_arg_id()});
+        } else {
+            const parse_integer_result arg_value = parse_arg_id();
+            if (arg_value.tag == parse_integer_result::type::error)
+                return cb.error();
+            const std::size_t arg_id =
+                  arg_value.tag == parse_integer_result::type::none
+                        ? pc.next_arg_id()
+                        : (pc.check_arg_id(arg_value.integer),
+                           arg_value.integer);
+            fmt.consume(':');
             cb.replacement_field(replacement_field<CharT>{arg_id});
+        }
         if (!fmt.consume('}'))
             cb.error();
     }
@@ -2351,27 +2361,15 @@ constexpr void arg_out(Context& fc,
 template <class CharT, class Out>
 LRSTD_EXTRA_CONSTEXPR Out
 vformat_to_core(basic_format_context<Out, CharT>& context,
-                basic_string_view<CharT> fmt_sv) {
-    basic_format_parse_context<CharT> parse_context(fmt_sv,
-                                                    context.args_size());
-
-    range<CharT> fmt(fmt_sv);
-
+                basic_string_view<CharT> fmt) {
+    basic_format_parse_context<CharT> parse_context(fmt, context.args_size());
     struct Callbacks {
         constexpr void text(range<CharT> range) const {
             context.advance_to(overlapping_str_writer{}(range.as_string_view(),
                                                         context.out()));
         }
         constexpr void replacement_field(replacement_field<CharT> field) const {
-            parse_context._begin = field.format_spec.begin();
-            parse_context._end = field.format_spec.end();
             arg_out(context, parse_context, context.arg(field.arg_id));
-        }
-        constexpr std::size_t next_arg_id() {
-            return parse_context.next_arg_id();
-        }
-        constexpr void check_arg_id(std::size_t arg_id) {
-            parse_context.check_arg_id(arg_id);
         }
         [[noreturn]] void error() {
             throw_format_error("invalid format string");
@@ -2379,7 +2377,7 @@ vformat_to_core(basic_format_context<Out, CharT>& context,
         basic_format_context<Out, CharT>& context;
         basic_format_parse_context<CharT>& parse_context;
     };
-    fmt_str_parser<CharT>{range<CharT>{fmt}}.parse(
+    fmt_str_parser<CharT>{parse_context}.parse(
           Callbacks{context, parse_context});
     return context.out();
 }
