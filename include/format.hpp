@@ -2233,15 +2233,6 @@ struct formatter : public detail::formatter_impl<T, Char> {};
 namespace detail {
 
 template <class CharT>
-struct replacement_field {
-    explicit replacement_field(std::size_t arg_id,
-                               range<CharT> format_spec = {})
-        : format_spec{format_spec}, arg_id{arg_id} {}
-    range<CharT> format_spec;
-    std::size_t arg_id;
-};
-
-template <class CharT>
 struct fmt_str_parser {
     basic_format_parse_context<CharT>& pc;
 
@@ -2294,12 +2285,12 @@ struct fmt_str_parser {
         range<CharT>& fmt = pc._rng;
         LRSTD_ASSERT(!fmt.empty());
         if (fmt.match_nonempty('}')) {
-            cb.replacement_field(replacement_field<CharT>{pc.next_arg_id()});
+            cb.replacement_field(pc.next_arg_id());
             fmt.remove_prefix(1);
             return;
         }
         if (fmt.consume(':')) {
-            cb.replacement_field(replacement_field<CharT>{pc.next_arg_id()});
+            cb.replacement_field(pc.next_arg_id());
         } else {
             const parse_integer_result arg_value = parse_arg_id();
             if (arg_value.tag == parse_integer_result::type::error)
@@ -2308,7 +2299,7 @@ struct fmt_str_parser {
                 return cb.error();
             LRSTD_ASSERT(arg_value.tag == parse_integer_result::type::success);
             pc.check_arg_id(arg_value.integer);
-            cb.replacement_field(replacement_field<CharT>{arg_value.integer});
+            cb.replacement_field(arg_value.integer);
         }
         if (!fmt.consume('}'))
             cb.error();
@@ -2371,8 +2362,8 @@ vformat_to_core(basic_format_context<Out, CharT>& context,
             context.advance_to(overlapping_str_writer{}(range.as_string_view(),
                                                         context.out()));
         }
-        constexpr void replacement_field(replacement_field<CharT> field) const {
-            arg_out(context, parse_context, context.arg(field.arg_id));
+        constexpr void replacement_field(std::size_t arg_id) const {
+            arg_out(context, parse_context, context.arg(arg_id));
         }
         [[noreturn]] void error() {
             throw_format_error("invalid format string");
