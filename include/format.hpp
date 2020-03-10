@@ -2295,17 +2295,20 @@ struct fmt_str_parser {
         LRSTD_ASSERT(!fmt.empty());
         if (fmt.match_nonempty('}')) {
             cb.replacement_field(replacement_field<CharT>{pc.next_arg_id()});
+            fmt.remove_prefix(1);
+            return;
+        }
+        if (fmt.consume(':')) {
+            cb.replacement_field(replacement_field<CharT>{pc.next_arg_id()});
         } else {
             const parse_integer_result arg_value = parse_arg_id();
             if (arg_value.tag == parse_integer_result::type::error)
                 return cb.error();
-            const std::size_t arg_id =
-                  arg_value.tag == parse_integer_result::type::none
-                        ? pc.next_arg_id()
-                        : (pc.check_arg_id(arg_value.integer),
-                           arg_value.integer);
-            fmt.consume(':');
-            cb.replacement_field(replacement_field<CharT>{arg_id});
+            if (!fmt.consume(':') && !fmt.match('}'))
+                return cb.error();
+            LRSTD_ASSERT(arg_value.tag == parse_integer_result::type::success);
+            pc.check_arg_id(arg_value.integer);
+            cb.replacement_field(replacement_field<CharT>{arg_value.integer});
         }
         if (!fmt.consume('}'))
             cb.error();

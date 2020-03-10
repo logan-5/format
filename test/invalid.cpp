@@ -32,24 +32,16 @@ TEMPLATE_TEST_CASE("parse_errors", "", char, wchar_t) {
     str_fn<TestType> str;
 
     for (auto& pattern : {
-               str("}{"),
-               str("{:.}"),
-               str("{:00}"),
-               str("{:x0}"),
-               str("{:x#}"),
-               str("{:LL}"),
-               str("{"),
-               str("}"),
-               str("{}}"),
-               str("cold{brew"),
-               str("cold}brew"),
-               str("coldbrew}"),
-               str("coldbrew{"),
-               str("{coldbrew"),
-               str("}coldbrew"),
-               str("{}coldbrew{"),
-               str("{}coldbrew}"),
-               str("{:{{}"),
+               str("}{"),          str("{:.}"),        str("{:00}"),
+               str("{:x0}"),       str("{:x#}"),       str("{:LL}"),
+               str("{"),           str("}"),           str("{}}"),
+               str("cold{brew"),   str("cold}brew"),   str("coldbrew}"),
+               str("coldbrew{"),   str("{coldbrew"),   str("}coldbrew"),
+               str("{}coldbrew{"), str("{}coldbrew}"), str("{:{{}"),
+               str("{x}"),         str("{qwerty}"),    str("{10x}"),
+               str("{x10}"),       str("{x10x}"),      str("{4%*}"),
+               str("{x:}"),        str("{qwerty:}"),   str("{10x:}"),
+               str("{x10:}"),      str("{x10x:}"),     str("{4%*:}"),
          }) {
         CHECK_THROWS_AS(format(pattern, 5), lrstd::format_error);
         CHECK(format(str("{}"), pattern) == pattern);
